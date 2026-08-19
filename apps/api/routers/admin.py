@@ -1,15 +1,27 @@
+from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from apps.api.db import get_db
-from apps.api.models.catalog import SupplierChannel
+from apps.api.models.catalog import ChannelStatus, Product, ProductOffer, SupplierChannel
 from apps.api.models.order import Order
-from apps.api.schemas.catalog import ChannelCreate, ChannelOut
+from apps.api.schemas.catalog import (
+    AdminProductOut,
+    AdminProductPatch,
+    ChannelCreate,
+    ChannelOut,
+    ChannelStatusUpdate,
+    ManualProductCreate,
+    OfferLogOut,
+    StoreSettingsOut,
+    StoreSettingsUpdate,
+)
 from apps.api.schemas.order import AdminOrderAction, AdminOrderStatusUpdate, OrderOut
+from apps.api.services.admin_catalog import get_or_create_store_settings, slugify_manual
 from apps.api.services.orders import apply_admin_status, cancel_order, mark_issued
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -17,6 +29,33 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 def _orders_query():
     return select(Order).options(selectinload(Order.items))
+
+
+@router.get("/settings", response_model=StoreSettingsOut)
+async def get_settings(db: AsyncSession = Depends(get_db)) -> StoreSettingsOut:
+    row = await get_or_create_store_settings(db)
+    await db.commit()
+    return StoreSettingsOut(
+        default_markup_percent=row.default_markup_percent,
+        price_round_to=row.price_round_to,
+    )
+
+
+@router.patch("/settings", response_model=StoreSettingsOut)
+async def patch_settings(
+    payload: StoreSettingsUpdate, db: AsyncSession = Depends(get_db)
+) -> StoreSettingsOut:
+    row = await get_or_create_store_settings(db)
+    if payload.default_markup_percent is not None:
+        row.default_markup_percent = payload.default_markup_percent
+    if payload.price_round_to is not None:
+        row.price_round_to = payload.price_round_to
+    await db.commit()
+    await db.refresh(row)
+    return StoreSettingsOut(
+        default_markup_percent=row.default_markup_percent,
+        price_round_to=row.price_round_to,
+    )
 
 
 @router.get("/channels", response_model=list[ChannelOut])
@@ -37,6 +76,124 @@ async def create_channel(payload: ChannelCreate, db: AsyncSession = Depends(get_
     await db.commit()
     await db.refresh(channel)
     return channel
+
+
+@router.patch("/channels/{channel_id}/status", response_model=ChannelOut)
+async def patch_channel_status(
+    channel_id: UUID,
+    payload: ChannelStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> SupplierChannel:
+    result = await db.execute(select(SupplierChannel).where(SupplierChannel.id == channel_id))
+    channel = result.scalar_one_or_none()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Канал не найден")
+    try:
+        channel.status = ChannelStatus(payload.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Неверный статус") from exc
+    await db.commit()
+    await db.refresh(channel)
+    return channel
+
+
+@router.get("/products", response_model=list[AdminProductOut])
+async def admin_list_products(
+    q: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> list[Product]:
+    stmt = select(Product)
+    if q:
+        stmt = stmt.where(Product.title.ilike(f"%{q}%"))
+    stmt = stmt.order_by(Product.updated_at.desc()).limit(limit).offset(offset)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.post("/products", response_model=AdminProductOut, status_code=201)
+async def create_manual_product(
+    payload: ManualProductCreate, db: AsyncSession = Depends(get_db)
+) -> Product:
+    product = Product(
+        slug=slugify_manual(payload.title),
+        title=payload.title.strip(),
+        brand=(payload.brand or "").strip() or None,
+        description=(payload.description or "").strip() or None,
+        price=payload.price.quantize(Decimal("0.01")),
+        cost_median=payload.price.quantize(Decimal("0.01")),
+        markup_percent=Decimal("0"),
+        is_manual=True,
+        is_hot=payload.is_hot,
+        is_published=payload.is_published,
+        attributes={"source": "manual"},
+    )
+    db.add(product)
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+@router.patch("/products/{product_id}", response_model=AdminProductOut)
+async def patch_product(
+    product_id: UUID,
+    payload: AdminProductPatch,
+    db: AsyncSession = Depends(get_db),
+) -> Product:
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    if payload.is_hot is not None:
+        product.is_hot = payload.is_hot
+    if payload.is_published is not None:
+        product.is_published = payload.is_published
+    if payload.title is not None:
+        product.title = payload.title.strip()
+    if payload.price is not None:
+        product.price = payload.price.quantize(Decimal("0.01"))
+        if product.is_manual:
+            product.cost_median = product.price
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+@router.get("/products/{product_id}/offers", response_model=list[OfferLogOut])
+async def product_offers(
+    product_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[OfferLogOut]:
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Товар не найден")
+
+    offers = (
+        await db.execute(
+            select(ProductOffer)
+            .options(selectinload(ProductOffer.channel))
+            .where(ProductOffer.product_id == product_id)
+            .order_by(ProductOffer.parsed_at.desc())
+            .limit(100)
+        )
+    ).scalars().all()
+
+    return [
+        OfferLogOut(
+            id=o.id,
+            raw_title=o.raw_title,
+            raw_price=o.raw_price,
+            currency=o.currency,
+            parsed_at=o.parsed_at,
+            source_message_id=o.source_message_id,
+            is_active=o.is_active,
+            channel_id=o.channel_id,
+            channel_title=o.channel.title if o.channel else "—",
+            folder_label=o.channel.folder_label if o.channel else None,
+        )
+        for o in offers
+    ]
 
 
 @router.get("/orders", response_model=list[OrderOut])

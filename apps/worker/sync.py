@@ -114,6 +114,17 @@ async def sync_folder(
 
         async with SessionLocal() as session:
             await ensure_schema(session)
+            try:
+                from apps.api.services.admin_catalog import get_or_create_store_settings
+
+                store = await get_or_create_store_settings(session)
+                markup = float(store.default_markup_percent)
+                round_to = int(store.price_round_to)
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                logger.warning("StoreSettings unavailable — using env markup defaults")
+                await session.rollback()
+                await ensure_schema(session)
             result = await session.execute(select(Category).where(Category.slug == category_slug))
             category = result.scalar_one_or_none()
             if category is None:

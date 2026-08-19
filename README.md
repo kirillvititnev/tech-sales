@@ -69,6 +69,11 @@ docker compose --profile vpn up -d xray
 2. URL: `https://<публичный-хост>/mini` (локально для разработки открывай `/mini` в браузере).
 3. Опционально: `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`, позже `TELEGRAM_BOT_TOKEN` для проверки `initData`.
 
+### Админка
+
+http://localhost:3000/admin — заказы, каналы, каталог (HOT/публикация/ручные товары), лог цен, наценка.  
+Пока без логина (auth — следующий этап).
+
 ## Структура
 
 ```
