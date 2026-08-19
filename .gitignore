@@ -1,0 +1,45 @@
+# env & secrets
+.env
+.env.local
+*.session
+*.session-journal
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# flutter
+apps/mobile/.dart_tool/
+apps/mobile/build/
+
+# ide / os
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# data
+data/
+uploads/
+*.log
+infra/vpn/xray.config.json
+
+# Compound Engineering
+.compound-engineering/*.local.yaml

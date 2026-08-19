@@ -1,0 +1,244 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0b0b0c;
+  --paper: #f4f4f2;
+  --mute: #8a8a8e;
+  --line: rgba(11, 11, 12, 0.12);
+  --hot: #e10600;
+  --surface: rgba(255, 255, 255, 0.72);
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(0, 0, 0, 0.08), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(225, 6, 0, 0.08), transparent 45%),
+    linear-gradient(180deg, #fafaf8 0%, #ecece8 100%);
+  font-family: var(--font-body), sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(14px);
+  background: rgba(244, 244, 242, 0.82);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.site-header nav {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.95rem;
+  color: var(--mute);
+}
+
+.site-header nav a:hover {
+  color: var(--ink);
+}
+
+.hero {
+  min-height: calc(100svh - 72px);
+  display: grid;
+  align-content: end;
+  padding: 2rem 1.5rem 3.5rem;
+  background:
+    linear-gradient(180deg, rgba(11, 11, 12, 0.05), rgba(11, 11, 12, 0.88)),
+    url("/logo.png") right 8% center / min(42vw, 420px) no-repeat,
+    #111;
+  color: #f7f7f5;
+}
+
+.hero-brand {
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(3.2rem, 10vw, 7rem);
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin: 0 0 1rem;
+}
+
+.hero p {
+  max-width: 28rem;
+  margin: 0 0 1.75rem;
+  color: rgba(247, 247, 245, 0.78);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 1.25rem;
+  border: 1px solid transparent;
+  font-family: var(--font-display), sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  transition: transform 180ms ease, background 180ms ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  background: #f7f7f5;
+  color: var(--ink);
+}
+
+.btn-ghost {
+  border-color: rgba(247, 247, 245, 0.35);
+  color: #f7f7f5;
+}
+
+.section {
+  padding: 3rem 1.5rem 4rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.section h2 {
+  font-family: var(--font-display), sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  margin: 0 0 0.4rem;
+}
+
+.section .lead {
+  color: var(--mute);
+  margin: 0 0 1.75rem;
+}
+
+.product-grid {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.product-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 1.1rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.product-row h3 {
+  margin: 0.15rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 560;
+}
+
+.product-brand {
+  margin: 0;
+  color: var(--mute);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.product-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
+.hot-tag {
+  color: var(--hot);
+  font-family: var(--font-display), sans-serif;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.empty {
+  color: var(--mute);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 0.85rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.95rem;
+}
+
+.admin-table th {
+  color: var(--mute);
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 720px) {
+  .site-header nav {
+    gap: 0.8rem;
+    font-size: 0.85rem;
+  }
+
+  .hero {
+    background-position: right -10% center;
+    background-size: min(70vw, 280px);
+  }
+
+  .product-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -1,0 +1,383 @@
+"""Sync Telegram folder channels → supplier offers → storefront products."""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import re
+import unicodedata
+import uuid
+from collections import defaultdict
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from telethon.tl.types import InputPeerChannel
+
+from apps.api.db import SessionLocal
+from apps.api.models.catalog import (
+    Category,
+    ChannelStatus,
+    Product,
+    ProductOffer,
+    SupplierChannel,
+)
+from apps.api.services.pricing import storefront_price
+from apps.worker.config import get_worker_settings
+from apps.worker.folders import get_folder_channels
+from apps.worker.offer_identity import OfferKind, classify_offer
+from apps.worker.parser import normalize_title, parse_price_text
+from apps.worker.tg import make_telegram_client
+
+logger = logging.getLogger(__name__)
+
+
+def make_slug(identity_key: str, display_title: str) -> str:
+    normalized = normalize_title(display_title)
+    ascii_part = unicodedata.normalize("NFKD", normalized).encode("ascii", "ignore").decode()
+    base = re.sub(r"[^a-z0-9]+", "-", ascii_part).strip("-")[:60] or "item"
+    digest = identity_key[:8]
+    return f"{base}-{digest}"
+
+
+def external_key(raw_title: str, message_id: int | None = None) -> str:
+    seed = f"{normalize_title(raw_title)}|{message_id or ''}"
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()
+
+
+async def ensure_schema(session: AsyncSession) -> None:
+    await session.execute(
+        text("ALTER TABLE supplier_channels ADD COLUMN IF NOT EXISTS folder_label VARCHAR(128)")
+    )
+    await session.commit()
+
+
+async def upsert_channel(
+    session: AsyncSession,
+    *,
+    telegram_id: str,
+    title: str,
+    username: str | None,
+    is_private: bool,
+    folder_label: str,
+) -> SupplierChannel:
+    result = await session.execute(
+        select(SupplierChannel).where(SupplierChannel.telegram_id == telegram_id)
+    )
+    channel = result.scalar_one_or_none()
+    if channel is None:
+        channel = SupplierChannel(
+            telegram_id=telegram_id,
+            title=title,
+            username=username,
+            is_private=is_private,
+            folder_label=folder_label,
+            status=ChannelStatus.active,
+        )
+        session.add(channel)
+        await session.flush()
+    else:
+        channel.title = title
+        channel.username = username
+        channel.is_private = is_private
+        channel.folder_label = folder_label
+        channel.status = ChannelStatus.active
+    return channel
+
+
+async def sync_folder(
+    folder_name: str = "Apple",
+    *,
+    messages_per_channel: int = 40,
+    category_slug: str = "apple",
+) -> dict[str, int]:
+    worker_settings = get_worker_settings()
+    markup = worker_settings.default_markup_percent
+    round_to = worker_settings.price_round_to
+    min_price = Decimal(worker_settings.min_offer_price_rub)
+
+    stats = {
+        "channels": 0,
+        "messages": 0,
+        "lines": 0,
+        "offers": 0,
+        "products": 0,
+        "rejected": 0,
+        "errors": 0,
+    }
+
+    client = make_telegram_client()
+    async with client:
+        folder_channels = await get_folder_channels(client, folder_name)
+        logger.info("Folder '%s': %s channels", folder_name, len(folder_channels))
+
+        async with SessionLocal() as session:
+            await ensure_schema(session)
+            result = await session.execute(select(Category).where(Category.slug == category_slug))
+            category = result.scalar_one_or_none()
+            if category is None:
+                category = Category(
+                    slug=category_slug,
+                    name=folder_name,
+                    sort_order=20,
+                    is_active=True,
+                )
+                session.add(category)
+                await session.flush()
+
+            display_meta: dict[str, dict] = {}
+
+            for fc in folder_channels:
+                channel: SupplierChannel | None = None
+                try:
+                    channel = await upsert_channel(
+                        session,
+                        telegram_id=fc.telegram_id,
+                        title=fc.title,
+                        username=fc.username,
+                        is_private=fc.is_private,
+                        folder_label=folder_name,
+                    )
+                    stats["channels"] += 1
+
+                    entity = await client.get_entity(
+                        InputPeerChannel(fc.channel_id, fc.access_hash)
+                    )
+                    messages = await client.get_messages(entity, limit=messages_per_channel)
+                    active_keys: set[str] = set()
+
+                    for msg in messages:
+                        text = msg.message or ""
+                        if not text.strip():
+                            continue
+                        stats["messages"] += 1
+                        for line in parse_price_text(text):
+                            stats["lines"] += 1
+                            if line.price < min_price:
+                                stats["rejected"] += 1
+                                continue
+                            identity = classify_offer(line.title, section=None)
+                            # title already has careful section glue from parser
+                            if not identity.publish or not identity.identity_key:
+                                stats["rejected"] += 1
+                                continue
+
+                            ext = external_key(line.title, msg.id)
+                            active_keys.add(ext)
+                            meta = display_meta.setdefault(
+                                identity.identity_key,
+                                {
+                                    "title": identity.display_title,
+                                    "model": identity.model,
+                                    "storage": identity.storage,
+                                    "color": identity.color,
+                                    "sim": identity.sim,
+                                    "regions": set(),
+                                    "kind": identity.kind.value,
+                                },
+                            )
+                            if identity.region:
+                                meta["regions"].add(identity.region)
+
+                            existing = await session.execute(
+                                select(ProductOffer).where(
+                                    ProductOffer.channel_id == channel.id,
+                                    ProductOffer.external_key == ext,
+                                )
+                            )
+                            offer = existing.scalar_one_or_none()
+                            payload = {
+                                "message_id": msg.id,
+                                "date": msg.date.isoformat() if msg.date else None,
+                                "raw": line.raw,
+                                "section": line.section,
+                                "identity_key": identity.identity_key,
+                                "sim": identity.sim,
+                                "region": identity.region,
+                                "model": identity.model,
+                            }
+                            if offer is None:
+                                session.add(
+                                    ProductOffer(
+                                        channel_id=channel.id,
+                                        external_key=ext,
+                                        raw_title=line.title,
+                                        raw_price=line.price,
+                                        currency="RUB",
+                                        source_message_id=str(msg.id),
+                                        raw_payload=payload,
+                                        is_active=True,
+                                    )
+                                )
+                            else:
+                                offer.raw_title = line.title
+                                offer.raw_price = line.price
+                                offer.source_message_id = str(msg.id)
+                                offer.raw_payload = payload
+                                offer.is_active = True
+                                offer.parsed_at = datetime.now(timezone.utc)
+                            stats["offers"] += 1
+
+                    if active_keys:
+                        all_offers = await session.execute(
+                            select(ProductOffer).where(
+                                ProductOffer.channel_id == channel.id,
+                                ProductOffer.is_active.is_(True),
+                            )
+                        )
+                        for offer in all_offers.scalars().all():
+                            if offer.external_key not in active_keys:
+                                offer.is_active = False
+
+                    channel.last_parsed_at = datetime.now(timezone.utc)
+                    channel.last_error = None
+                    await session.commit()
+                except Exception as exc:  # noqa: BLE001
+                    stats["errors"] += 1
+                    logger.exception("Channel sync failed: %s", fc.title)
+                    await session.rollback()
+                    if channel is not None:
+                        try:
+                            channel = await session.merge(channel)
+                            channel.last_error = str(exc)[:1000]
+                            channel.status = ChannelStatus.error
+                            await session.commit()
+                        except Exception:  # noqa: BLE001
+                            await session.rollback()
+
+            channel_ids = (
+                await session.execute(
+                    select(SupplierChannel.id).where(SupplierChannel.folder_label == folder_name)
+                )
+            ).scalars().all()
+
+            if not channel_ids:
+                logger.warning("No channels stored for folder %s", folder_name)
+                return stats
+
+            offers = list(
+                (
+                    await session.execute(
+                        select(ProductOffer).where(
+                            ProductOffer.channel_id.in_(channel_ids),
+                            ProductOffer.is_active.is_(True),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_key: dict[str, list[ProductOffer]] = defaultdict(list)
+            for offer in offers:
+                payload = offer.raw_payload or {}
+                key = payload.get("identity_key")
+                if not key:
+                    identity = classify_offer(offer.raw_title)
+                    if not identity.publish or not identity.identity_key:
+                        continue
+                    key = identity.identity_key
+                    meta = display_meta.setdefault(
+                        key,
+                        {
+                            "title": identity.display_title,
+                            "model": identity.model,
+                            "storage": identity.storage,
+                            "color": identity.color,
+                            "sim": identity.sim,
+                            "regions": set(),
+                            "kind": identity.kind.value,
+                        },
+                    )
+                    if identity.region:
+                        meta["regions"].add(identity.region)
+                by_key[key].append(offer)
+
+            seen_product_ids: set[uuid.UUID] = set()
+            for key, offer_list in by_key.items():
+                if not key:
+                    continue
+                prices = [Decimal(o.raw_price) for o in offer_list]
+                cost, price = storefront_price(prices, markup_percent=markup, round_to=round_to)
+                meta = display_meta.get(key) or {}
+                title = meta.get("title") or offer_list[0].raw_title
+                slug = make_slug(key, title)
+                brand = "Apple" if meta.get("kind") in {OfferKind.iphone.value, OfferKind.apple_other.value} else None
+                regions = sorted(meta.get("regions") or [])
+                attrs = {
+                    "norm_key": key,
+                    "folder": folder_name,
+                    "model": meta.get("model"),
+                    "storage": meta.get("storage"),
+                    "color": meta.get("color"),
+                    "sim": meta.get("sim"),
+                    "region_samples": regions,
+                }
+
+                existing = await session.execute(select(Product).where(Product.slug == slug))
+                product = existing.scalar_one_or_none()
+                if product is None:
+                    linked = next((o.product_id for o in offer_list if o.product_id), None)
+                    if linked:
+                        product = await session.get(Product, linked)
+
+                if product is None:
+                    product = Product(
+                        slug=slug,
+                        title=title,
+                        brand=brand,
+                        category_id=category.id,
+                        attributes=attrs,
+                        cost_median=cost,
+                        price=price,
+                        markup_percent=Decimal(str(markup)),
+                        is_manual=False,
+                        is_hot=False,
+                        is_published=True,
+                    )
+                    session.add(product)
+                    await session.flush()
+                    stats["products"] += 1
+                else:
+                    product.title = title
+                    product.brand = brand or product.brand
+                    product.category_id = category.id
+                    product.cost_median = cost
+                    product.price = price
+                    product.markup_percent = Decimal(str(markup))
+                    product.is_published = True
+                    product.attributes = attrs
+                    stats["products"] += 1
+
+                seen_product_ids.add(product.id)
+                for offer in offer_list:
+                    offer.product_id = product.id
+
+            stale = await session.execute(
+                select(Product).where(
+                    Product.is_manual.is_(False),
+                    Product.attributes.contains({"folder": folder_name}),
+                )
+            )
+            for product in stale.scalars().all():
+                if product.id not in seen_product_ids:
+                    product.is_published = False
+
+            await session.commit()
+
+    logger.info("Sync done: %s", stats)
+    return stats
+
+
+async def run_parse_cycle(folder_name: str | None = None) -> dict[str, int]:
+    worker_settings = get_worker_settings()
+    if not worker_settings.telegram_api_id or not worker_settings.telegram_api_hash:
+        logger.warning("Telegram credentials missing — parse cycle skipped")
+        return {"channels": 0, "lines": 0, "skipped": 1}
+
+    folder = folder_name or "Apple"
+    try:
+        return await sync_folder(folder)
+    except Exception:
+        logger.exception("Parse cycle failed")
+        return {"channels": 0, "lines": 0, "skipped": 0, "errors": 1}

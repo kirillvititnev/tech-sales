@@ -1,0 +1,86 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "0.0.0.0",
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "udp": true,
+        "auth": "noauth"
+      }
+    },
+    {
+      "tag": "http-in",
+      "listen": "0.0.0.0",
+      "port": 1081,
+      "protocol": "http",
+      "settings": {}
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "vless-reality",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "VPN_SERVER_HOST",
+            "port": 443,
+            "users": [
+              {
+                "id": "VPN_UUID",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "fingerprint": "chrome",
+          "serverName": "VPN_SNI_DOMAIN",
+          "publicKey": "VPN_PUBLIC_KEY",
+          "shortId": "VPN_SHORT_ID",
+          "spiderX": "/"
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "vless-reality",
+        "domain": [
+          "geosite:telegram",
+          "domain:telegram.org",
+          "domain:t.me",
+          "domain:tdesktop.com",
+          "domain:telegra.ph"
+        ]
+      },
+      {
+        "type": "field",
+        "outboundTag": "vless-reality",
+        "ip": ["geoip:telegram"]
+      }
+    ]
+  }
+}
