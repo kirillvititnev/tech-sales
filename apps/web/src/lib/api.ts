@@ -20,20 +20,33 @@ export type Category = {
   sort_order: number;
 };
 
+export type OrderItem = {
+  id: string;
+  product_id: string | null;
+  title: string;
+  unit_price: string;
+  quantity: number;
+};
+
 export type Order = {
   id: string;
   number: string;
   customer_name: string;
   customer_phone: string;
+  customer_telegram?: string | null;
   customer_status: string;
   admin_status: string;
   delivery_type: string;
+  delivery_address?: string | null;
+  comment?: string | null;
   total_amount: string;
+  items?: OrderItem[];
 };
 
-async function apiGet<T>(path: string): Promise<T> {
+async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     next: { revalidate: 30 },
+    ...init,
   });
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${path}`);
@@ -61,6 +74,14 @@ export const api = {
   },
   product: (slug: string) => apiGet<Product>(`/api/v1/catalog/products/${slug}`),
   categories: () => apiGet<Category[]>("/api/v1/catalog/categories"),
-  adminOrders: () => apiGet<Order[]>("/api/v1/admin/orders"),
+  orderByNumber: (number: string) =>
+    apiGet<Order>(`/api/v1/orders/by-number/${encodeURIComponent(number)}`, {
+      next: { revalidate: 0 },
+      cache: "no-store",
+    }),
+  adminOrders: () =>
+    apiGet<Order[]>("/api/v1/admin/orders", { next: { revalidate: 0 }, cache: "no-store" }),
   health: () => apiGet<{ status: string }>("/health"),
 };
+
+export { API_URL };

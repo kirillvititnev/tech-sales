@@ -11,6 +11,7 @@ export function SiteHeader() {
       <nav>
         <Link href="/hot">HOT</Link>
         <Link href="/#catalog">Каталог</Link>
+        <Link href="/mini">Mini App</Link>
         <Link href="/admin">Админка</Link>
       </nav>
     </header>

@@ -24,6 +24,9 @@ make worker      # фоновый парсер (нужны TELEGRAM_API_ID/HASH)
 make test
 ```
 
+Mini App (локально): http://localhost:3000/mini — тот же каталог и checkout.  
+В BotFather укажи Web App URL на `https://<ваш-домен>/mini` (нужен HTTPS).
+
 > Postgres в docker слушает **5433** (чтобы не конфликтовать с другими локальными БД).
 > Redis можно поднять через docker или `brew services start redis` / `redis-server`.
 
@@ -59,6 +62,12 @@ docker compose --profile vpn up -d xray
 Подробности: `infra/vpn/README.md`.
 
 Сейчас `TELEGRAM_PROXY` оставь пустым.
+
+### Mini App
+
+1. Создай бота в BotFather, команду `/newapp` (или Menu Button → Web App).
+2. URL: `https://<публичный-хост>/mini` (локально для разработки открывай `/mini` в браузере).
+3. Опционально: `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`, позже `TELEGRAM_BOT_TOKEN` для проверки `initData`.
 
 ## Структура
 

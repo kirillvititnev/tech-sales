@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { api, formatPrice } from "@/lib/api";
 
-export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function MiniProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   let product: Awaited<ReturnType<typeof api.product>>;
   try {
@@ -21,10 +21,13 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         <strong>{formatPrice(product.price)}</strong>
       </p>
       <div className="cta-row">
-        <Link href={`/checkout?product=${encodeURIComponent(product.slug)}`} className="btn btn-primary">
+        <Link
+          href={`/mini/checkout?product=${encodeURIComponent(product.slug)}`}
+          className="btn btn-primary"
+        >
           Заказать
         </Link>
-        <Link href="/#catalog" className="btn btn-ghost" style={{ borderColor: "var(--line)", color: "var(--ink)" }}>
+        <Link href="/mini" className="btn btn-ghost" style={{ borderColor: "var(--line)", color: "var(--ink)" }}>
           К каталогу
         </Link>
       </div>

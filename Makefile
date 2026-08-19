@@ -57,3 +57,5 @@ seed:
 
 test:
 	PYTHONPATH=. .venv/bin/pytest apps/worker/tests apps/api/tests -q
+	node --experimental-strip-types --test apps/web/src/lib/telegramUser.test.ts
+	cd apps/web && npm run build

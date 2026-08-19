@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Manrope, Oswald } from "next/font/google";
 
-import { SiteHeader } from "@/components/SiteHeader";
+import { AppChrome } from "@/components/AppChrome";
 
 import "./globals.css";
 
@@ -24,8 +24,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="ru">
       <body className={`${body.variable} ${display.variable} antialiased`}>
-        <SiteHeader />
-        {children}
+        <AppChrome>{children}</AppChrome>
       </body>
     </html>
   );
