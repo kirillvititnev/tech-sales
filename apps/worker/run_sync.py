@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync Telegram folder → White Shop catalog")
     parser.add_argument("--folder", default="Apple", help="Telegram folder name")
-    parser.add_argument("--messages", type=int, default=40, help="Messages per channel")
+    parser.add_argument("--messages", type=int, default=100, help="Messages per channel")
     parser.add_argument("--category", default="apple", help="Category slug")
     args = parser.parse_args()
 

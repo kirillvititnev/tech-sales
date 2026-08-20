@@ -89,7 +89,7 @@ async def upsert_channel(
 async def sync_folder(
     folder_name: str = "Apple",
     *,
-    messages_per_channel: int = 40,
+    messages_per_channel: int = 100,
     category_slug: str = "apple",
 ) -> dict[str, int]:
     worker_settings = get_worker_settings()
@@ -347,6 +347,8 @@ async def sync_folder(
                 OfferKind.dyson.value,
                 OfferKind.yandex.value,
                 OfferKind.meta.value,
+                OfferKind.audio.value,
+                OfferKind.camera.value,
             }
             seen_product_ids: set[uuid.UUID] = set()
             for key, offer_list in by_key.items():

@@ -603,6 +603,43 @@ def test_galaxy_buds_and_watch_8() -> None:
     assert watch.color == "Gray"
 
 
+def test_galaxy_ring_unisale() -> None:
+    # Samsung OEM: Titanium Gold; sizes 5–13
+    ring = classify_offer("Galaxy Ring Titanium Gold 10 Q500")
+    assert ring.publish is True
+    assert ring.brand == "Samsung"
+    assert ring.device_name == "Galaxy Ring 10"
+    assert ring.color == "Titanium Gold"
+    assert ring.model_code == "Q500"
+    assert "Size 10" in ring.config
+
+
+def test_review_fixes_precision_gates() -> None:
+    # MacBook Neo year must not be stripped as a price token
+    neo = classify_offer("MacBook Neo 2025 16/512GB Silver")
+    assert neo.publish is True
+    assert "2025" in neo.device_name
+
+    # Pixel-only finishes must not leak onto iPhone
+    iphone = classify_offer("iPhone 16 128GB Snow")
+    assert iphone.publish is False or iphone.color != "Snow"
+
+    # Bare model tokens without brand must not invent OEM brands
+    assert classify_offer("Aura Studio 3 Black").publish is False
+    assert classify_offer("Hero 12 Black").publish is False
+
+    # Region paren is not a color — reject rather than invent "Eu"
+    jbl = classify_offer("JBL Flip 7 (EU)")
+    assert jbl.publish is False
+    assert jbl.reject_reason == "audio_missing_color"
+
+    # PowerShot keeps space before color
+    cam = classify_offer("PowerShot G7X Mark III Black")
+    assert cam.publish is True
+    assert "G7XBlack" not in cam.device_name
+    assert cam.color == "Black"
+
+
 def test_macbook_bare_and_apple_accessories() -> None:
     mb = classify_offer("Pro 14 M1 Pro 2021 16/1TB Space Gray MKGQ3")
     assert mb.publish and mb.device_name.startswith("MacBook Pro 14")
@@ -628,4 +665,180 @@ def test_indonesia_flag_region() -> None:
     from apps.worker.offer_identity import extract_region
 
     assert extract_region("Air 13 M5 16/1TB 🇮🇩") == "id"
+
+
+def test_audio_jbl_marshall_beats_bose() -> None:
+    jbl = classify_offer("JBL Flip 7 (Purple) - 8800")
+    assert jbl.publish and jbl.kind == OfferKind.audio
+    assert jbl.brand == "JBL"
+    assert jbl.device_category == "Колонки"
+    assert jbl.device_name == "JBL Flip 7"
+    assert jbl.color == "Purple"
+
+    marshall = classify_offer("Marshall Willen II (Black)")
+    assert marshall.publish and marshall.brand == "Marshall"
+    assert marshall.device_category == "Колонки"
+    assert "Willen II" in marshall.device_name
+
+    motif = classify_offer("Marshall Motif II ANC (Black)")
+    assert motif.publish and motif.device_category == "Наушники"
+
+    beats = classify_offer("Beats Pill (Champagne Gold)")
+    assert beats.publish and beats.brand == "Beats"
+    assert beats.device_category == "Колонки"
+
+    bose = classify_offer("Bose Ultra Open Earbuds (White Smoke)")
+    assert bose.publish and bose.brand == "Bose"
+    assert bose.device_category == "Наушники"
+
+    senn = classify_offer("Sennheiser Momentum True Wireless 4 (Black)")
+    assert senn.publish and senn.brand == "Sennheiser"
+
+    hk = classify_offer("Harman Kardon Onyx Studio 9 (Black)")
+    assert hk.publish and hk.brand == "Harman Kardon"
+    assert hk.device_category == "Колонки"
+
+    bw = classify_offer("Bowers & Wilkins Px7 S2e (Black)")
+    assert bw.publish and bw.brand == "Bowers & Wilkins"
+    assert bw.device_category == "Наушники"
+
+    beo = classify_offer("Beoplay HX (Black Anthracite)")
+    assert beo.publish and beo.brand == "Beoplay"
+    assert "HX" in beo.device_name
+
+    # OnePlus Buds Pro 3 OEM finish — must not steal Galaxy Buds path
+    buds = classify_offer("OnePlus Buds 3 Pro Lunar Radiance 🇪🇺")
+    assert buds.publish and buds.kind == OfferKind.audio
+    assert buds.brand == "OnePlus"
+    assert buds.color == "Lunar Radiance"
+    assert "Galaxy" not in buds.device_name
+
+
+def test_macbook_leading_order_code_unisale() -> None:
+    air = classify_offer("MC654 Air 13 Silver M4 24/512GB")
+    assert air.publish is True
+    assert air.device_name == "MacBook Air 13 M4"
+    assert air.color == "Silver"
+    assert air.model_code == "MC654"
+    assert "24/512GB" in air.config
+    assert "MC654" in air.config
+
+    pro = classify_offer("MPHH3 Pro 14 Silver M2 Pro 16/512GB")
+    assert pro.publish is True
+    assert pro.device_name == "MacBook Pro 14 M2 Pro"
+    assert pro.model_code == "MPHH3"
+    assert pro.color == "Silver"
+
+    # Top re:sale: order-code line under MacBook section (16/1tb must not block glue as iPhone 16)
+    top = classify_offer("🇷🇺 MKGQ3 – 16/1tb Space Gray — 123000₽", section="MacBook Pro 14 (M1)")
+    assert top.publish is True
+    assert top.device_name == "MacBook Pro 14 M1"
+    assert top.model_code == "MKGQ3"
+    assert "123000" not in top.device_name
+
+
+def test_android_realme_oneplus_nothing_tecno_colors() -> None:
+    # OEM Pixel 7 finishes: Lemongrass, Snow (Google)
+    pixel = classify_offer("Pixel 7 8/128GB Lemongrass")
+    assert pixel.publish and pixel.color == "Lemongrass"
+    assert pixel.device_name == "Pixel 7"
+
+    snow = classify_offer("Pixel 7 8/128GB Snow")
+    assert snow.publish and snow.color == "Snow"
+
+    # Huawei OEM: Lake Cyan (Nova 15 Max), Guava Soda (Pura 90s Pro)
+    lake = classify_offer("Huawei Nova 15 Max 8/256GB Lake Cyan")
+    assert lake.publish and lake.color == "Lake Cyan"
+
+    guava = classify_offer("Huawei Pura 90s Pro 12/512GB Guava Soda")
+    assert guava.publish and guava.color == "Guava Soda"
+
+    realme = classify_offer("Realme c85 8/256GB Blue 🇷🇺")
+    assert realme.publish and realme.brand == "Realme"
+    assert realme.device_name == "Realme C85"
+
+    p3 = classify_offer("Realme p3 Lite 8/256GB Black")
+    assert p3.publish and "P3" in p3.device_name and "Lite" in p3.device_name
+
+    op = classify_offer("OnePlus 13s 12/256GB Black")
+    assert op.publish and op.brand == "OnePlus"
+    assert "13s" in op.device_name or "13S" in op.device_name
+
+    op15 = classify_offer("OnePlus 15 16/512GB Black")
+    assert op15.publish and op15.brand == "OnePlus"
+
+    nothing = classify_offer("Nothing Phone 3 12/256GB Black")
+    assert nothing.publish and nothing.brand == "Nothing"
+    assert "Phone 3" in nothing.device_name
+
+    tecno = classify_offer("Tecno 40 Camon 8/256GB Black")
+    assert tecno.publish and tecno.brand == "Tecno"
+    assert tecno.device_name == "Tecno Camon 40"
+
+
+def test_samsung_fold_flip_fe_finishes() -> None:
+    fold = classify_offer("Galaxy z fold8 12/512GB Pistachio 🇹🇭")
+    assert fold.publish is True
+    assert fold.device_name == "Galaxy Z Fold8"
+    assert fold.color == "Pistachio"
+
+    flip = classify_offer("Galaxy z flip7 8/256GB Jetblack")
+    assert flip.publish is True
+    assert flip.device_name == "Galaxy Z Flip7"
+    assert flip.color == "Jet Black"
+
+    fe = classify_offer("S25 FE 8/256GB Jetblack")
+    assert fe.publish is True
+    assert fe.device_name == "Galaxy S25 FE"
+    assert fe.color == "Jet Black"
+
+
+def test_meta_rayban_without_meta_token() -> None:
+    rb = classify_offer("Ray-Ban Wayfarer RW4012 (Matte Black/Clear) L")
+    assert rb.publish and rb.kind == OfferKind.meta
+    assert rb.device_name == "Ray-Ban Meta Wayfarer"
+    assert "RW4012" in rb.config
+
+
+def test_dyson_am07_and_v16s_submarine() -> None:
+    fan = classify_offer("Dyson AM07 White/Silver")
+    assert fan.publish and fan.kind == OfferKind.dyson
+    assert "AM07" in fan.device_name
+    assert fan.device_category == "Вентиляторы"
+
+    vac = classify_offer("Dyson V16s Piston Animal Submarine")
+    assert vac.publish and "V16s" in vac.device_name
+    assert "Submarine" in vac.device_name
+    assert vac.device_category == "Пылесосы"
+
+
+def test_camera_instax_dji_gopro_powershot() -> None:
+    # Fujifilm Instax ≠ Insta360
+    instax = classify_offer("Instax sq1 Square Chalk White")
+    assert instax.publish and instax.kind == OfferKind.camera
+    assert instax.brand == "Fujifilm"
+    assert instax.device_category == "Фото"
+    assert "SQ1" in instax.device_name
+    assert instax.color == "Chalk White"
+
+    link = classify_offer("Instax LINK Wide Black")
+    assert link.publish and link.brand == "Fujifilm"
+    assert "Link Wide" in link.device_name
+
+    # Must not route Instax into Insta360
+    assert instax.kind != OfferKind.insta360
+
+    dji = classify_offer("DJI Osmo 6 Action (Adventure Combo) Black")
+    assert dji.publish and dji.brand == "DJI"
+    assert dji.device_name == "DJI Osmo Action 6"
+    assert "Adventure Combo" in dji.config
+    assert dji.color == "Black"
+
+    gopro = classify_offer("GoPro Hero 12 Black")
+    assert gopro.publish and gopro.brand == "GoPro"
+    assert "Hero 12" in gopro.device_name
+
+    canon = classify_offer("Canon PowerShot G7X Black")
+    assert canon.publish and canon.brand == "Canon"
+    assert "G7X" in canon.device_name or "PowerShot" in canon.device_name
 
