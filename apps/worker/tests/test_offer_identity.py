@@ -446,7 +446,7 @@ def test_ipad_a16_is_ipad_11() -> None:
 def test_macbook_model_code_in_config_not_name() -> None:
     ident = classify_offer("MacBook NEO A18 MHFJ4 – 8/512 Blush")
     assert ident.publish is True
-    assert ident.device_name == "MacBook NEO A18"
+    assert ident.device_name == "MacBook Neo A18"
     assert ident.color == "Blush"
     assert ident.model_code == "MHFJ4"
     assert ident.config == "8/512GB · Blush · MHFJ4"
@@ -841,4 +841,68 @@ def test_camera_instax_dji_gopro_powershot() -> None:
     canon = classify_offer("Canon PowerShot G7X Black")
     assert canon.publish and canon.brand == "Canon"
     assert "G7X" in canon.device_name or "PowerShot" in canon.device_name
+
+
+def test_macbook_ram_not_in_device_name() -> None:
+    ident = classify_offer("MKGQ3 · 16/1TB · Space Gray", section="MACBOOK PRO 14")
+    assert ident.publish is True
+    assert ident.device_name == "MacBook Pro 14" or ident.device_name.lower() == "macbook pro 14"
+    assert "16/" not in ident.device_name
+    assert "16/1TB" in ident.config
+
+
+def test_ipad_strips_unisale_part_marker() -> None:
+    ident = classify_offer(
+        "iPad Air 11 (M2) 2024 256GB Wi‑Fi Blue 🇭🇰",
+        section="iPad Air (часть 1/2)",
+    )
+    assert ident.publish is True
+    assert "часть" not in ident.device_name.lower()
+    assert ident.device_name.startswith("iPad Air 11")
+
+    glued = classify_offer(
+        "iPad Air (часть 1/2) iPad Air 11 (M2) 2024 256GB Wi‑Fi Blue 🇭🇰",
+        section="iPad Air (часть 1/2)",
+    )
+    assert glued.publish is True
+    assert "часть" not in glued.device_name.lower()
+
+
+def test_imac_excluded() -> None:
+    ident = classify_offer("iMac M4 (10/10/16/1TB) Orange")
+    assert ident.publish is False
+    assert ident.reject_reason == "imac_excluded"
+
+    mini = classify_offer(
+        "MWUU3 iMac M4 Silver (10/10/16/256) 🇷🇺",
+        section="iMac \\ Mac mini (часть 2/2)",
+    )
+    assert mini.publish is False
+    assert mini.reject_reason == "imac_excluded"
+
+
+def test_galaxy_watch_ultra_not_apple() -> None:
+    ident = classify_offer("Galaxy Watch Ultra SM-L705F (2025) 47mm LTE Blue🇨🇱")
+    assert ident.publish is True
+    assert ident.brand == "Samsung"
+    assert ident.device_name.startswith("Galaxy Watch Ultra")
+    assert "Apple" not in ident.device_name
+
+
+def test_macbook_novye_air13_clean() -> None:
+    ident = classify_offer(
+        "Air13 M5 16/1TB Starlight (2026) MDHC4",
+        section="MacBook Новые",
+    )
+    assert ident.publish is True
+    assert "новые" not in ident.device_name.lower()
+    assert "16/" not in ident.device_name
+    assert "Air 13" in ident.device_name or "Air13" in ident.device_name.replace(" ", "")
+    assert "M5" in ident.device_name
+    assert ident.model_code == "MDHC4"
+
+
+def test_cable_not_macbook() -> None:
+    ident = classify_offer("Оригинальные кабеля lightning/ type-c")
+    assert ident.publish is False
 

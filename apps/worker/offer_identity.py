@@ -108,6 +108,24 @@ SIM_PATTERNS: list[tuple[re.Pattern[str], SimType]] = [
 STORAGE_RE = re.compile(r"\b(\d+)\s*(tb|gb)\b", re.I)
 # Top re:sale Samsung lines: "S25 Ultra 12/256 Black"
 RAM_STORAGE_RE = re.compile(r"\b(\d{1,2})\s*/\s*(\d+)\s*(tb|gb)?\b", re.I)
+# Leftover after partial RAM/storage strip: "16/" or "24/"
+RAM_ORPHAN_SLASH_RE = re.compile(r"\b\d{1,2}\s*/\s*(?=\s|$|[A-Za-zА-Яа-я])")
+# iMac / MacBook GPU tuples: (10/10/16/256) or 10c CPU/16c GPU/16/512
+CPU_GPU_TUPLE_RE = re.compile(
+    r"\(?\s*\d{1,2}\s*(?:c\s*)?(?:cpu)?\s*/\s*\d{1,2}\s*(?:c\s*)?(?:gpu)?\s*/\s*\d{1,2}\s*/\s*\d+\s*(?:tb|gb)?\s*\)?",
+    re.I,
+)
+# Unisale multipart headers: "(часть 1/2)" / "часть 2/2"
+PART_MARKER_RE = re.compile(r"\(?\s*часть\s*\d+\s*/\s*\d+\s*\)?", re.I)
+# Marketing / noise tokens that must never stay in device_name
+APPLE_NAME_JUNK_RE = re.compile(
+    r"(?i)\b("
+    r"новые|обменки|актив|оригинал(?:ьные|ьный|ые)?|кабел[ьяи]|кабель|"
+    r"lightning|type[\s\-]?c|прайс|часть"
+    r")\b",
+)
+# Supplier prices glued into the line without a dash: "MDVD4 133.000" / "103 000"
+EMBEDDED_PRICE_RE = re.compile(r"\b\d{1,3}(?:[.\s]\d{3}){1,2}\b")
 
 # Android / non-Apple phones — never classify as iPhone via bare "16" in "16/512"
 NON_APPLE_PHONE_RE = re.compile(
@@ -1056,6 +1074,9 @@ def normalize_series_case_color(case_color: str) -> str:
 
 def parse_apple_watch(title: str) -> tuple[str, str, str, str] | None:
     """Return (device_name, model_key, case_color, band) or None."""
+    # Never claim Galaxy Watch Ultra / Samsung watches as Apple
+    if re.search(r"(?i)\bgalaxy\b", title) and re.search(r"(?i)\bwatch\b", title):
+        return None
     band = ""
     band_m = WATCH_BAND_RE.search(title.strip())
     head = title[: band_m.start()].strip() if band_m else title
@@ -1125,8 +1146,21 @@ def extract_apple_model_code(title: str) -> str:
             continue
         if re.fullmatch(r"\d+[A-Z]{2}", code):  # 256GB-style already filtered; belt
             continue
+        # Compact series+size (Air13 / Pro14) is not an order code
+        if re.fullmatch(r"(?:AIR|PRO|NEO)\d{2}", code):
+            continue
         return code
     return ""
+
+
+def normalize_section_header(section: str | None) -> str:
+    """Strip multipart markers and marketing tokens from supplier section headers."""
+    if not section:
+        return ""
+    cleaned = strip_part_marker(section)
+    cleaned = re.sub(r"(?i)\bновые\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:/")
+    return cleaned
 
 
 def build_config(
@@ -1233,10 +1267,12 @@ def _apple_other_device_name(token: str, working: str) -> tuple[str, str, str, s
     for pattern, _ in SIM_PATTERNS:
         tail = pattern.sub(" ", tail)
     tail = REGION_TOKEN_RE.sub(" ", tail)
-    # RAM/storage before bare storage — else "16/1tb" → "16/" leftover
-    tail = RAM_STORAGE_RE.sub(" ", tail)
-    tail = STORAGE_RE.sub(" ", tail)
+    # GPU/CPU/RAM/storage before orphan slash leftovers
+    tail = scrub_spec_leaks(tail)
     tail = strip_emoji(tail)
+    tail = APPLE_NAME_JUNK_RE.sub(" ", tail)
+    # Air13 / Pro14 → Air 13 / Pro 14
+    tail = re.sub(r"(?i)\b(air|pro)(\d{2})\b", r"\1 \2", tail)
     # drop color words (keep connectivity: Wi-Fi / LTE)
     for c in (
         "space\\s*gr[ae]y",
@@ -1277,22 +1313,81 @@ def _apple_other_device_name(token: str, working: str) -> tuple[str, str, str, s
     ):
         if not str(code).upper().endswith(("GB", "TB")):
             tail = re.sub(rf"\b{re.escape(code)}\b", " ", tail, flags=re.I)
+    # Years are not part of the shelf name (supplier "(2026)" marketing),
+    # except MacBook Neo 2025-style model years adjacent to Neo.
+    tail = re.sub(r"\(\s*20\d{2}\s*\)", " ", tail)
+    if not re.search(r"(?i)\bneo\s*20\d{2}\b", working):
+        tail = re.sub(r"\b20\d{2}\b", " ", tail)
     tail = re.sub(re.escape(token), " ", tail, flags=re.I)
+    # Drop repeated series words already in prefix (MacBook Air … Air)
+    if key == "macbook":
+        tail = re.sub(r"(?i)\bmacbook\b", " ", tail)
+    if key == "ipad":
+        tail = re.sub(r"(?i)\bipad\b", " ", tail)
+    if key in {"apple watch", "watch ultra"}:
+        tail = re.sub(r"(?i)\b(?:apple\s*)?watch\b|\bultra\b", " ", tail)
+    if key == "imac":
+        tail = re.sub(r"(?i)\bimac\b|\bmac\s*mini\b", " ", tail)
     tail = re.sub(r"[^\w\s+./-]", " ", tail)
-    tail = re.sub(r"\s+", " ", tail).strip(" -")
+    tail = scrub_spec_leaks(tail)
+    tail = re.sub(r"\s+", " ", tail).strip(" -/")
     # keep first ~4 meaningful tokens
-    bits = [b for b in tail.split() if b.lower() not in {"apple", "the", "and", "для"}][:4]
+    bits = [
+        b
+        for b in tail.split()
+        if b.lower() not in {"apple", "the", "and", "для", "wi", "fi", "wifi"}
+    ][:4]
     device_name = prefix if not bits else f"{prefix} {' '.join(bits)}"
     device_name = collapse_duplicate_tokens(device_name)
     device_name = re.sub(r"\banc\b", "ANC", device_name, flags=re.I)
     device_name = re.sub(r"\busb[\s\-]?c\b", "USB-C", device_name, flags=re.I)
     if key == "macbook":
+        # MacBook Neo: normalize "13 Neo A18Pro" → "MacBook Neo 13 A18 Pro"
+        if re.search(r"(?i)\bneo\b", working):
+            size_m = re.search(r"(?i)(?:\bneo\s*(1[3-6])\b|\b(1[3-6])\s*neo\b)", working)
+            chip_m = re.search(r"(?i)\b(a\d{2})\s*(pro)?\b|\bm(\d+)(?:\s*(pro|max|ultra))?\b", working)
+            year_m = re.search(r"(?i)\bneo\s*(20\d{2})\b", working)
+            parts = ["MacBook", "Neo"]
+            if size_m:
+                parts.append(size_m.group(1) or size_m.group(2))
+            if chip_m:
+                if chip_m.group(1):
+                    chip = chip_m.group(1).upper()
+                    if chip_m.group(2):
+                        chip = f"{chip} Pro"
+                    parts.append(chip)
+                else:
+                    chip = f"M{chip_m.group(3)}"
+                    if chip_m.group(4):
+                        chip = f"{chip} {chip_m.group(4).title()}"
+                    parts.append(chip)
+            if year_m:
+                parts.append(year_m.group(1))
+            device_name = " ".join(parts)
+            model_key = device_name.lower()
+            return brand, category, device_name, model_key
         # Supplier "Max M4" / "Pro M4" → official "M4 Max" / "M4 Pro"
         device_name = re.sub(
             r"(?i)\b(max|pro)\s+m(\d+)\b",
             lambda m: f"M{m.group(2)} {m.group(1).title()}",
             device_name,
         )
+        device_name = re.sub(
+            r"(?i)\b(air|pro|neo)\b",
+            lambda m: m.group(1).title(),
+            device_name,
+        )
+        # "MacBook Air 15 M5 Air" → drop trailing duplicate series
+        device_name = re.sub(r"(?i)\b(air|pro|neo)\s+\1\b", r"\1", device_name)
+        device_name = re.sub(
+            r"(?i)^(macbook(?:\s+(?:air|pro|neo))?.*?)\s+(air|pro|neo)$",
+            r"\1",
+            device_name,
+        )
+    if key == "ipad":
+        device_name = re.sub(r"(?i)\b(air|pro)\s+\1\b", r"\1", device_name)
+    device_name = scrub_spec_leaks(device_name)
+    device_name = collapse_duplicate_tokens(device_name)
     model_key = device_name.lower()
     return brand, category, device_name, model_key
 
@@ -1302,6 +1397,10 @@ def prefix_fallback(token: str) -> str:
 
 
 def should_prepend_section(section: str | None, title: str) -> bool:
+    if not section:
+        return False
+    section = strip_part_marker(section)
+    title = strip_part_marker(title)
     if not section:
         return False
     if is_junk_section(section):
@@ -1338,6 +1437,12 @@ def should_prepend_section(section: str | None, title: str) -> bool:
     # MacBook continuation: Pro/Air/Neo + M-chip — allow MacBook section glue
     if re.search(r"(?i)\b(?:pro|air)\s+1[3-6]\s+m\d|\bneo\s+20\d{2}\b", title):
         return bool(re.search(r"(?i)\bmacbook\b", section))
+    # Compact Air13 / Pro14 continuations under MacBook sections
+    if re.search(r"(?i)\b(?:air|pro)\d{2}\b", title):
+        return bool(re.search(r"(?i)\bmacbook\b", section))
+    # Bare Air13 / Pro14 / Neo lines — glue MacBook header even after stripping «Новые»
+    if re.search(r"(?i)^\s*(?:air|pro)\s*1[3-6]\b|^\s*neo\b", title.strip()):
+        return bool(re.search(r"(?i)\bmacbook\b", section))
     # Dyson SKU codes under HD## / Airwrap / vacuum sections
     if re.search(r"(?i)^\s*(?:hd\d+|v\d+|ph\d+|hs\d+|sv\d+|tp\d+|hu\d+)\b", title.strip()):
         return bool(re.search(r"(?i)\b(dyson|hd\d+|airwrap|supersonic|беспровод|воздухооч)\b", section))
@@ -1350,7 +1455,7 @@ def should_prepend_section(section: str | None, title: str) -> bool:
 def is_junk_section(section: str | None) -> bool:
     if not section:
         return False
-    s = section.strip()
+    s = strip_part_marker(section).strip()
     if not s:
         return False
     if SECTION_JUNK_RE.search(s):
@@ -2051,10 +2156,22 @@ def parse_galaxy_buds(title: str) -> tuple[str, str, str, str] | None:
 def parse_galaxy_watch(title: str) -> tuple[str, str, str, str, str] | None:
     """Return (device_name, model_key, color, connectivity, size) or None."""
     raw = re.sub(r"\s+", " ", title.strip())
-    if not re.search(r"(?i)\b(?:galaxy\s+)?watch\s*8\b", raw):
-        return None
     # Avoid Apple Watch Ultra false positives
     if re.search(r"(?i)\bapple\s*watch\b", raw):
+        return None
+    # Galaxy Watch Ultra (SM-L705F etc.) — must win over Apple `watch ultra` token
+    if re.search(r"(?i)\bgalaxy\s+watch\s+ultra\b", raw) or (
+        re.search(r"(?i)\bgalaxy\b", raw)
+        and re.search(r"(?i)\bwatch\s+ultra\b", raw)
+        and re.search(r"(?i)\bsm-[a-z0-9]+", raw)
+    ):
+        size_m = re.search(r"(?i)\b(\d{2})\s*mm\b", raw)
+        size = f"{size_m.group(1)}mm" if size_m else ""
+        connectivity = "LTE" if re.search(r"(?i)\blte\b", raw) else ""
+        color = extract_color(raw)
+        device_name = "Galaxy Watch Ultra" + (f" {size}" if size else "")
+        return device_name, device_name.lower(), color or "", connectivity, size
+    if not re.search(r"(?i)\b(?:galaxy\s+)?watch\s*8\b", raw):
         return None
     ultra = bool(re.search(r"(?i)\bultra\b", raw))
     classic = bool(re.search(r"(?i)\bclassic\b", raw))
@@ -2071,6 +2188,28 @@ def parse_galaxy_watch(title: str) -> tuple[str, str, str, str, str] | None:
     if size:
         device_name = f"{device_name} {size}"
     return device_name, device_name.lower(), color or "", connectivity, size
+
+
+def strip_part_marker(text: str | None) -> str:
+    """Remove Unisale multipart markers like '(часть 1/2)'."""
+    if not text:
+        return ""
+    cleaned = PART_MARKER_RE.sub(" ", text)
+    return re.sub(r"\s+", " ", cleaned).strip(" -/")
+
+
+def scrub_spec_leaks(text: str) -> str:
+    """Drop RAM/GPU fragments that must not appear in device_name."""
+    out = CPU_GPU_TUPLE_RE.sub(" ", text)
+    out = RAM_STORAGE_RE.sub(" ", out)
+    out = STORAGE_RE.sub(" ", out)
+    out = RAM_ORPHAN_SLASH_RE.sub(" ", out)
+    out = EMBEDDED_PRICE_RE.sub(" ", out)
+    # Bare capacity tokens left after unit strip: "iPad … 512 Space Black"
+    out = re.sub(r"\b(64|128|256|512|1024|2048)\b", " ", out)
+    out = re.sub(r"\s*/\s*", " ", out)
+    out = re.sub(r"\s+", " ", out).strip(" -/")
+    return out
 
 
 def parse_galaxy_ring(title: str) -> tuple[str, str, str, str, str] | None:
@@ -2559,9 +2698,14 @@ def parse_airpods_max(title: str) -> tuple[str, str, str, str, str] | None:
 
 
 def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
-    working = title.strip()
+    section = normalize_section_header(section) or None
+    working = strip_part_marker(title.strip())
+    working = re.sub(r"(?i)\bновые\b", " ", working)
+    working = re.sub(r"\s+", " ", working).strip()
     if should_prepend_section(section, working):
-        working = f"{section} {working}".strip()
+        working = strip_part_marker(f"{section} {working}".strip())
+        working = re.sub(r"(?i)\bновые\b", " ", working)
+        working = re.sub(r"\s+", " ", working).strip()
 
     # Detect ASIS before noise strip (markers get removed from the working title)
     asis_from = " ".join(x for x in [working, section or "", title] if x)
@@ -2578,6 +2722,27 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
             display_title=working,
             reject_reason="noise_or_unrecognized",
         )
+
+    # User-directed: drop iMacs from the storefront entirely
+    if re.search(r"(?i)\bimac\b", f"{working} {section or ''}"):
+        cleaned = clean_offer_title(working)
+        return _rejected(
+            model=cleaned[:80].lower() or "imac",
+            display_title=cleaned or working,
+            reject_reason="imac_excluded",
+        )
+
+    # Cables / lightning accessories must not become MacBook SKUs
+    if re.search(r"(?i)\bmacbook\b", working) and re.search(
+        r"(?i)\b(кабел|cable|lightning|type[\s\-]?c)\b", working
+    ):
+        if not re.search(r"(?i)\b(air|pro|neo)\s*1?[3-6]?\b|\bm\d+\b", working):
+            cleaned = clean_offer_title(working)
+            return _rejected(
+                model=cleaned[:80].lower(),
+                display_title=cleaned or working,
+                reject_reason="noise_or_unrecognized",
+            )
 
     region = extract_region(working)
     sim_text = extract_sim_text(working)
@@ -2605,6 +2770,9 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
     iphone_model = normalize_iphone_model(working)
     galaxy_model = normalize_galaxy_model(working)
     other_matches = list(APPLE_OTHER_RE.finditer(working))
+    # Prefer concrete product tokens over bare `watch ultra` when Galaxy is present
+    if re.search(r"(?i)\bgalaxy\b", working):
+        other_matches = [m for m in other_matches if "watch" not in m.group(0).lower()]
     other = max(other_matches, key=lambda m: len(m.group(0))) if other_matches else None
     watch = parse_apple_watch(working) or parse_apple_watch(title)
     galaxy_buds = parse_galaxy_buds(working) or parse_galaxy_buds(title)
