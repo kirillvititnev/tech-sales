@@ -37,3 +37,50 @@ def test_phone_number_not_price() -> None:
 
 def test_price_above_legacy_min() -> None:
     assert parse_price_token("6500") == Decimal("6500")
+
+
+def test_top_resale_style_clean_lines() -> None:
+    text = """
+IPhone 16:
+🇺🇸 16 128GB Black — 61200₽
+🇺🇸 16 128GB White — 62500₽
+AirPods 4 ANC  — 13800₽
+"""
+    lines = parse_price_text(text)
+    titles = [line.title for line in lines]
+    assert any("16 128GB Black" in t for t in titles)
+    assert all("Прайс" not in t and "Выдача" not in t for t in titles)
+    black = next(line for line in lines if "128GB Black" in line.title)
+    assert not black.title.lower().startswith("iphone 16:")
+
+
+def test_bests_trailing_region_flag_after_price() -> None:
+    text = """
+Galaxy S23 Plus
+S23 Plus 8/512GB Black — 42.800 🇦🇪
+Mac Mini M4 16/512GB MU9E3 — 76.300 🇭🇰
+DualSense White — 5.800
+"""
+    lines = parse_price_text(text)
+    assert len(lines) == 3
+    assert lines[0].price == Decimal("42800")
+    assert "S23 Plus" in lines[0].title
+    assert "🇦🇪" in lines[0].title  # trailing flag moved onto title for region/SIM
+    assert lines[1].price == Decimal("76300")
+    assert "🇭🇰" in lines[1].title
+    assert lines[2].price == Decimal("5800")
+
+
+def test_junk_banner_not_used_as_section() -> None:
+    text = """
+Выдача в день заказа или на следующий день до 14:00‼️
+Saeco Magic M1 — 218900
+Прайс Galaxy S
+• S25 Ultra 12/256Gb Titanium Black — 65900₽
+"""
+    lines = parse_price_text(text)
+    assert len(lines) == 2
+    assert lines[0].title == "Saeco Magic M1"
+    assert "Выдача" not in lines[0].title
+    assert lines[1].title.startswith("S25 Ultra")
+    assert "Прайс" not in lines[1].title

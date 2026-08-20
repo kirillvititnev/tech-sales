@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 
-from apps.worker.offer_identity import should_prepend_section
+from apps.worker.offer_identity import is_junk_section, should_prepend_section
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,13 @@ logger = logging.getLogger(__name__)
 # 17 Pro Max 256GB Blue 🇯🇵 (E-Sim) - 102800
 # 🇮🇳 17e 256GB Black    - 56 800
 # Ray-Ban Wayfarer ... - 39.000₽
+# Trailing region flag after price is common in Bests re:sale:
+#   S23 Plus 8/512GB Black — 42.800 🇦🇪
+_REGION_FLAG = r"[\U0001F1E6-\U0001F1FF]{2}"
 PRICE_LINE_RE = re.compile(
-    r"^(?P<title>.+?)\s*[-–—/|:]\s*(?P<price>\d[\d\s.]{0,20}?)\s*(?:₽|руб\.?|р\.?)?\s*$",
+    r"^(?P<title>.+?)\s*[-–—/|:]\s*(?P<price>\d[\d\s.]{0,20}?)\s*"
+    r"(?:₽|руб\.?|р\.?)?\s*"
+    rf"(?P<flag>{_REGION_FLAG})?\s*$",
     re.IGNORECASE,
 )
 
@@ -84,7 +89,18 @@ def parse_price_text(text: str) -> list[ParsedLine]:
         match = PRICE_LINE_RE.match(line)
         if match:
             title = match.group("title").strip()
-            title = re.sub(r"^[^\wА-Яа-я]+", "", title).strip()
+            # Keep leading region flags (🇺🇸); only strip bullets / junk symbols
+            title = re.sub(
+                r"^(?:[^\wА-Яа-я\U0001F1E6-\U0001F1FF]+)+",
+                "",
+                title,
+            ).strip()
+            # Drop leading "Прайс" glued into the price line itself
+            title = re.sub(r"(?i)^\s*прайс\s+", "", title).strip()
+            # Bests-style flag after price → keep on title for region/SIM
+            flag = match.group("flag")
+            if flag and not re.search(r"[\U0001F1E6-\U0001F1FF]", title):
+                title = f"{title} {flag}".strip()
             price = parse_price_token(match.group("price"))
             if price is None or not title:
                 continue
@@ -100,7 +116,10 @@ def parse_price_text(text: str) -> list[ParsedLine]:
         if not re.search(r"\d{3,}", line):
             header = HEADER_RE.match(line)
             if header:
-                section = re.sub(r"^[^\wА-Яа-я]+", "", header.group("header")).strip()
+                candidate = re.sub(r"^[^\wА-Яа-я]+", "", header.group("header")).strip()
+                # Never treat logistics / "Прайс …" banners as product sections
+                if candidate and not is_junk_section(candidate):
+                    section = candidate
     return results
 
 

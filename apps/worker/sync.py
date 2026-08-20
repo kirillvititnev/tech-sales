@@ -26,7 +26,7 @@ from apps.api.models.catalog import (
 from apps.api.services.pricing import storefront_price
 from apps.worker.config import get_worker_settings
 from apps.worker.folders import get_folder_channels
-from apps.worker.offer_identity import OfferKind, classify_offer
+from apps.worker.offer_identity import OfferKind, classify_offer, min_price_for_kind
 from apps.worker.parser import normalize_title, parse_price_text
 from apps.worker.tg import make_telegram_client
 
@@ -173,6 +173,10 @@ async def sync_folder(
                             if not identity.publish or not identity.identity_key:
                                 stats["rejected"] += 1
                                 continue
+                            floor = max(min_price, Decimal(min_price_for_kind(identity.kind)))
+                            if line.price < floor:
+                                stats["rejected"] += 1
+                                continue
 
                             ext = external_key(line.title, msg.id)
                             active_keys.add(ext)
@@ -180,12 +184,19 @@ async def sync_folder(
                                 identity.identity_key,
                                 {
                                     "title": identity.display_title,
+                                    "brand": identity.brand,
+                                    "device_category": identity.device_category,
+                                    "device_name": identity.device_name,
+                                    "config": identity.config,
                                     "model": identity.model,
                                     "storage": identity.storage,
                                     "color": identity.color,
                                     "sim": identity.sim,
+                                    "ram": identity.ram,
                                     "regions": set(),
                                     "kind": identity.kind.value,
+                                    "band": identity.band,
+                                    "model_code": identity.model_code,
                                 },
                             )
                             if identity.region:
@@ -281,47 +292,106 @@ async def sync_folder(
             )
             by_key: dict[str, list[ProductOffer]] = defaultdict(list)
             for offer in offers:
-                payload = offer.raw_payload or {}
-                key = payload.get("identity_key")
-                if not key:
-                    identity = classify_offer(offer.raw_title)
-                    if not identity.publish or not identity.identity_key:
-                        continue
-                    key = identity.identity_key
-                    meta = display_meta.setdefault(
-                        key,
-                        {
-                            "title": identity.display_title,
-                            "model": identity.model,
-                            "storage": identity.storage,
-                            "color": identity.color,
-                            "sim": identity.sim,
-                            "regions": set(),
-                            "kind": identity.kind.value,
-                        },
-                    )
-                    if identity.region:
-                        meta["regions"].add(identity.region)
+                identity = classify_offer(offer.raw_title)
+                if not identity.publish or not identity.identity_key:
+                    continue
+                key = identity.identity_key
+                meta = display_meta.setdefault(
+                    key,
+                    {
+                        "title": identity.display_title,
+                        "brand": identity.brand,
+                        "device_category": identity.device_category,
+                        "device_name": identity.device_name,
+                        "config": identity.config,
+                        "model": identity.model,
+                        "storage": identity.storage,
+                        "color": identity.color,
+                        "sim": identity.sim,
+                        "ram": identity.ram,
+                        "band": identity.band,
+                        "model_code": identity.model_code,
+                        "regions": set(),
+                        "kind": identity.kind.value,
+                    },
+                )
+                if identity.region:
+                    meta["regions"].add(identity.region)
+                meta.update(
+                    {
+                        "title": identity.display_title,
+                        "brand": identity.brand,
+                        "device_category": identity.device_category,
+                        "device_name": identity.device_name,
+                        "config": identity.config,
+                        "model": identity.model,
+                        "storage": identity.storage,
+                        "color": identity.color,
+                        "sim": identity.sim,
+                        "ram": identity.ram,
+                        "band": identity.band,
+                        "model_code": identity.model_code,
+                        "kind": identity.kind.value,
+                    }
+                )
                 by_key[key].append(offer)
 
+            publish_kinds = {
+                OfferKind.iphone.value,
+                OfferKind.apple_other.value,
+                OfferKind.samsung.value,
+                OfferKind.sony.value,
+                OfferKind.insta360.value,
+                OfferKind.android.value,
+                OfferKind.gaming.value,
+                OfferKind.dyson.value,
+                OfferKind.yandex.value,
+                OfferKind.meta.value,
+            }
             seen_product_ids: set[uuid.UUID] = set()
             for key, offer_list in by_key.items():
                 if not key:
                     continue
-                prices = [Decimal(o.raw_price) for o in offer_list]
-                cost, price = storefront_price(prices, markup_percent=markup, round_to=round_to)
                 meta = display_meta.get(key) or {}
-                title = meta.get("title") or offer_list[0].raw_title
+                title = meta.get("title")
+                kind = meta.get("kind")
+                brand = meta.get("brand") or None
+                if not title or kind not in publish_kinds or not brand:
+                    continue
+                try:
+                    kind_enum = OfferKind(kind)
+                except ValueError:
+                    continue
+                floor = Decimal(max(int(min_price), min_price_for_kind(kind_enum)))
+                prices = [Decimal(o.raw_price) for o in offer_list if Decimal(o.raw_price) >= floor]
+                if not prices:
+                    continue
+                cost, price = storefront_price(prices, markup_percent=markup, round_to=round_to)
+                if cost < floor:
+                    continue
                 slug = make_slug(key, title)
-                brand = "Apple" if meta.get("kind") in {OfferKind.iphone.value, OfferKind.apple_other.value} else None
                 regions = sorted(meta.get("regions") or [])
                 attrs = {
                     "norm_key": key,
                     "folder": folder_name,
+                    "kind": kind,
+                    "device_category": meta.get("device_category") or "",
+                    "device_name": meta.get("device_name") or title,
+                    "config": meta.get("config") or "",
                     "model": meta.get("model"),
                     "storage": meta.get("storage"),
                     "color": meta.get("color"),
                     "sim": meta.get("sim"),
+                    "ram": meta.get("ram"),
+                    "band": meta.get("band") or "",
+                    "model_code": meta.get("model_code") or "",
+                    "condition": (
+                        "asis+"
+                        if str(meta.get("device_category") or "") == "Asis+*"
+                        else "asis"
+                        if str(meta.get("device_category") or "") == "Asis*"
+                        else ""
+                    ),
                     "region_samples": regions,
                 }
 
