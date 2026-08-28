@@ -1,31 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { formatPrice, type Product } from "@/lib/api";
+import { useCart, type CartLine } from "@/lib/cart";
+import { API_URL, formatPrice } from "@/lib/api";
 import type { CheckoutPrefill } from "@/lib/telegramUser";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type DeliveryType = "pickup_moscow" | "cdek";
 
 export function CheckoutForm({
-  product,
+  items,
   defaults,
   successHref,
+  clearCartOnSuccess = false,
 }: {
-  product: Product;
+  items: CartLine[];
   defaults?: CheckoutPrefill;
-  successHref?: (number: string) => string;
+  successHref?: (number: string, access: string) => string;
+  clearCartOnSuccess?: boolean;
 }) {
   const router = useRouter();
+  const { clear } = useCart();
   const [name, setName] = useState(defaults?.name ?? "");
   const [phone, setPhone] = useState("");
   const [telegram, setTelegram] = useState(defaults?.telegram ?? "");
   const [delivery, setDelivery] = useState<DeliveryType>("pickup_moscow");
   const [address, setAddress] = useState("");
   const [comment, setComment] = useState("");
+  const [privacyConsent, setPrivacyConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -35,13 +39,26 @@ export function CheckoutForm({
   }, [defaults?.name, defaults?.telegram]);
 
   const needsAddress = delivery === "cdek";
-  const priceLabel = useMemo(() => formatPrice(product.price), [product.price]);
+  const totalLabel = useMemo(() => {
+    const sum = items.reduce((s, l) => s + Number(l.price) * l.quantity, 0);
+    return formatPrice(String(sum));
+  }, [items]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!items.length) {
+      setError("Корзина пуста");
+      return;
+    }
+    if (!privacyConsent) {
+      setError("Нужно согласие на обработку персональных данных");
+      return;
+    }
     setPending(true);
     try {
+      const initData =
+        typeof window !== "undefined" ? window.Telegram?.WebApp?.initData ?? "" : "";
       const res = await fetch(`${API_URL}/api/v1/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -52,7 +69,12 @@ export function CheckoutForm({
           delivery_type: delivery,
           delivery_address: needsAddress ? address : null,
           comment: comment || null,
-          items: [{ product_id: product.id, quantity: 1 }],
+          telegram_init_data: initData || null,
+          privacy_consent: true,
+          items: items.map((l) => ({
+            product_id: l.productId,
+            quantity: l.quantity,
+          })),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -60,7 +82,11 @@ export function CheckoutForm({
         setError(typeof data.detail === "string" ? data.detail : "Не удалось оформить заказ");
         return;
       }
-      const href = successHref ? successHref(data.number) : `/order/${data.number}`;
+      if (clearCartOnSuccess) clear();
+      const access = typeof data.access_token === "string" ? data.access_token : "";
+      const href = successHref
+        ? successHref(data.number, access)
+        : `/order/${data.number}?access=${encodeURIComponent(access)}`;
       router.push(href);
     } catch {
       setError("Сеть недоступна. Проверьте API.");
@@ -72,9 +98,15 @@ export function CheckoutForm({
   return (
     <form className="checkout-form" onSubmit={onSubmit}>
       <div className="checkout-summary">
-        <p className="product-brand">{product.brand ?? "Техника"}</p>
-        <h3>{product.title}</h3>
-        <p className="checkout-price">{priceLabel}</p>
+        <p className="product-brand">Заказ</p>
+        <ul className="cart-summary-list">
+          {items.map((l) => (
+            <li key={l.productId}>
+              {l.title} × {l.quantity} — {formatPrice(l.price)}
+            </li>
+          ))}
+        </ul>
+        <p className="checkout-price">{totalLabel}</p>
         <p className="lead">Оплата через менеджера после подтверждения — онлайн-оплаты нет.</p>
       </div>
 
@@ -101,26 +133,34 @@ export function CheckoutForm({
         />
       </label>
 
-      <fieldset className="delivery-fieldset">
+      <fieldset className="delivery-group">
         <legend>Доставка</legend>
-        <label className="radio">
-          <input
-            type="radio"
-            name="delivery"
-            checked={delivery === "pickup_moscow"}
-            onChange={() => setDelivery("pickup_moscow")}
-          />
-          Самовывоз, Москва
-        </label>
-        <label className="radio">
-          <input
-            type="radio"
-            name="delivery"
-            checked={delivery === "cdek"}
-            onChange={() => setDelivery("cdek")}
-          />
-          СДЭК по России
-        </label>
+        <div className="delivery-options">
+          <label className="delivery-option">
+            <input
+              type="radio"
+              name="delivery"
+              checked={delivery === "pickup_moscow"}
+              onChange={() => setDelivery("pickup_moscow")}
+            />
+            <span className="delivery-option-text">
+              <span className="delivery-option-title">Самовывоз</span>
+              <span className="delivery-option-meta">Москва</span>
+            </span>
+          </label>
+          <label className="delivery-option">
+            <input
+              type="radio"
+              name="delivery"
+              checked={delivery === "cdek"}
+              onChange={() => setDelivery("cdek")}
+            />
+            <span className="delivery-option-text">
+              <span className="delivery-option-title">СДЭК</span>
+              <span className="delivery-option-meta">По России</span>
+            </span>
+          </label>
+        </div>
       </fieldset>
 
       {needsAddress ? (
@@ -141,9 +181,22 @@ export function CheckoutForm({
         <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2} />
       </label>
 
+      <div className="consent">
+        <label className="consent">
+          <input
+            type="checkbox"
+            checked={privacyConsent}
+            onChange={(e) => setPrivacyConsent(e.target.checked)}
+            required
+          />
+          <span>Согласен на обработку персональных данных</span>
+        </label>
+        <Link href="/privacy">Политика конфиденциальности</Link>
+      </div>
+
       {error ? <p className="form-error">{error}</p> : null}
 
-      <button className="btn btn-primary" type="submit" disabled={pending || !product.price}>
+      <button className="btn btn-primary" type="submit" disabled={pending || !items.length || !privacyConsent}>
         {pending ? "Оформляем…" : "Оформить заказ"}
       </button>
     </form>

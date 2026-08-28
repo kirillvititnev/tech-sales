@@ -26,7 +26,7 @@ from apps.api.models.catalog import (
 from apps.api.services.pricing import storefront_price
 from apps.worker.config import get_worker_settings
 from apps.worker.folders import get_folder_channels
-from apps.worker.offer_identity import OfferKind, classify_offer
+from apps.worker.offer_identity import OfferKind, classify_offer, min_price_for_kind
 from apps.worker.parser import normalize_title, parse_price_text
 from apps.worker.tg import make_telegram_client
 
@@ -89,8 +89,10 @@ async def upsert_channel(
 async def sync_folder(
     folder_name: str = "Apple",
     *,
-    messages_per_channel: int = 40,
+    messages_per_channel: int = 100,
     category_slug: str = "apple",
+    channel_title: str | None = None,
+    telegram_id: str | None = None,
 ) -> dict[str, int]:
     worker_settings = get_worker_settings()
     markup = worker_settings.default_markup_percent
@@ -110,7 +112,18 @@ async def sync_folder(
     client = make_telegram_client()
     async with client:
         folder_channels = await get_folder_channels(client, folder_name)
-        logger.info("Folder '%s': %s channels", folder_name, len(folder_channels))
+        if telegram_id:
+            folder_channels = [fc for fc in folder_channels if str(fc.telegram_id) == str(telegram_id)]
+        elif channel_title:
+            needle = channel_title.casefold()
+            folder_channels = [fc for fc in folder_channels if needle in fc.title.casefold()]
+        logger.info(
+            "Folder '%s': %s channels (filter title=%r id=%r)",
+            folder_name,
+            len(folder_channels),
+            channel_title,
+            telegram_id,
+        )
 
         async with SessionLocal() as session:
             await ensure_schema(session)
@@ -138,6 +151,7 @@ async def sync_folder(
                 await session.flush()
 
             display_meta: dict[str, dict] = {}
+            synced_channel_ids: list = []
 
             for fc in folder_channels:
                 channel: SupplierChannel | None = None
@@ -150,6 +164,7 @@ async def sync_folder(
                         is_private=fc.is_private,
                         folder_label=folder_name,
                     )
+                    synced_channel_ids.append(channel.id)
                     stats["channels"] += 1
 
                     entity = await client.get_entity(
@@ -168,9 +183,13 @@ async def sync_folder(
                             if line.price < min_price:
                                 stats["rejected"] += 1
                                 continue
-                            identity = classify_offer(line.title, section=None)
+                            identity = classify_offer(line.title, section=line.section)
                             # title already has careful section glue from parser
                             if not identity.publish or not identity.identity_key:
+                                stats["rejected"] += 1
+                                continue
+                            floor = max(min_price, Decimal(min_price_for_kind(identity.kind)))
+                            if line.price < floor:
                                 stats["rejected"] += 1
                                 continue
 
@@ -180,12 +199,19 @@ async def sync_folder(
                                 identity.identity_key,
                                 {
                                     "title": identity.display_title,
+                                    "brand": identity.brand,
+                                    "device_category": identity.device_category,
+                                    "device_name": identity.device_name,
+                                    "config": identity.config,
                                     "model": identity.model,
                                     "storage": identity.storage,
                                     "color": identity.color,
                                     "sim": identity.sim,
+                                    "ram": identity.ram,
                                     "regions": set(),
                                     "kind": identity.kind.value,
+                                    "band": identity.band,
+                                    "model_code": identity.model_code,
                                 },
                             )
                             if identity.region:
@@ -258,10 +284,14 @@ async def sync_folder(
                             await session.rollback()
 
             channel_ids = (
-                await session.execute(
-                    select(SupplierChannel.id).where(SupplierChannel.folder_label == folder_name)
-                )
-            ).scalars().all()
+                synced_channel_ids
+                if (telegram_id or channel_title) and synced_channel_ids
+                else (
+                    await session.execute(
+                        select(SupplierChannel.id).where(SupplierChannel.folder_label == folder_name)
+                    )
+                ).scalars().all()
+            )
 
             if not channel_ids:
                 logger.warning("No channels stored for folder %s", folder_name)
@@ -281,47 +311,112 @@ async def sync_folder(
             )
             by_key: dict[str, list[ProductOffer]] = defaultdict(list)
             for offer in offers:
-                payload = offer.raw_payload or {}
-                key = payload.get("identity_key")
-                if not key:
-                    identity = classify_offer(offer.raw_title)
-                    if not identity.publish or not identity.identity_key:
-                        continue
-                    key = identity.identity_key
-                    meta = display_meta.setdefault(
-                        key,
-                        {
-                            "title": identity.display_title,
-                            "model": identity.model,
-                            "storage": identity.storage,
-                            "color": identity.color,
-                            "sim": identity.sim,
-                            "regions": set(),
-                            "kind": identity.kind.value,
-                        },
-                    )
-                    if identity.region:
-                        meta["regions"].add(identity.region)
+                section = (offer.raw_payload or {}).get("section")
+                identity = classify_offer(
+                    offer.raw_title,
+                    section=section if isinstance(section, str) else None,
+                )
+                if not identity.publish or not identity.identity_key:
+                    continue
+                key = identity.identity_key
+                meta = display_meta.setdefault(
+                    key,
+                    {
+                        "title": identity.display_title,
+                        "brand": identity.brand,
+                        "device_category": identity.device_category,
+                        "device_name": identity.device_name,
+                        "config": identity.config,
+                        "model": identity.model,
+                        "storage": identity.storage,
+                        "color": identity.color,
+                        "sim": identity.sim,
+                        "ram": identity.ram,
+                        "band": identity.band,
+                        "model_code": identity.model_code,
+                        "regions": set(),
+                        "kind": identity.kind.value,
+                    },
+                )
+                if identity.region:
+                    meta["regions"].add(identity.region)
+                meta.update(
+                    {
+                        "title": identity.display_title,
+                        "brand": identity.brand,
+                        "device_category": identity.device_category,
+                        "device_name": identity.device_name,
+                        "config": identity.config,
+                        "model": identity.model,
+                        "storage": identity.storage,
+                        "color": identity.color,
+                        "sim": identity.sim,
+                        "ram": identity.ram,
+                        "band": identity.band,
+                        "model_code": identity.model_code,
+                        "kind": identity.kind.value,
+                    }
+                )
                 by_key[key].append(offer)
 
+            publish_kinds = {
+                OfferKind.iphone.value,
+                OfferKind.apple_other.value,
+                OfferKind.samsung.value,
+                OfferKind.sony.value,
+                OfferKind.insta360.value,
+                OfferKind.android.value,
+                OfferKind.gaming.value,
+                OfferKind.dyson.value,
+                OfferKind.yandex.value,
+                OfferKind.meta.value,
+                OfferKind.audio.value,
+                OfferKind.camera.value,
+            }
             seen_product_ids: set[uuid.UUID] = set()
             for key, offer_list in by_key.items():
                 if not key:
                     continue
-                prices = [Decimal(o.raw_price) for o in offer_list]
-                cost, price = storefront_price(prices, markup_percent=markup, round_to=round_to)
                 meta = display_meta.get(key) or {}
-                title = meta.get("title") or offer_list[0].raw_title
+                title = meta.get("title")
+                kind = meta.get("kind")
+                brand = meta.get("brand") or None
+                if not title or kind not in publish_kinds or not brand:
+                    continue
+                try:
+                    kind_enum = OfferKind(kind)
+                except ValueError:
+                    continue
+                floor = Decimal(max(int(min_price), min_price_for_kind(kind_enum)))
+                prices = [Decimal(o.raw_price) for o in offer_list if Decimal(o.raw_price) >= floor]
+                if not prices:
+                    continue
+                cost, price = storefront_price(prices, markup_percent=markup, round_to=round_to)
+                if cost < floor:
+                    continue
                 slug = make_slug(key, title)
-                brand = "Apple" if meta.get("kind") in {OfferKind.iphone.value, OfferKind.apple_other.value} else None
                 regions = sorted(meta.get("regions") or [])
                 attrs = {
                     "norm_key": key,
                     "folder": folder_name,
+                    "kind": kind,
+                    "device_category": meta.get("device_category") or "",
+                    "device_name": meta.get("device_name") or title,
+                    "config": meta.get("config") or "",
                     "model": meta.get("model"),
                     "storage": meta.get("storage"),
                     "color": meta.get("color"),
                     "sim": meta.get("sim"),
+                    "ram": meta.get("ram"),
+                    "band": meta.get("band") or "",
+                    "model_code": meta.get("model_code") or "",
+                    "condition": (
+                        "asis+"
+                        if str(meta.get("device_category") or "").endswith("ASIS+")
+                        else "asis"
+                        if str(meta.get("device_category") or "").endswith("ASIS")
+                        else ""
+                    ),
                     "region_samples": regions,
                 }
 
@@ -370,9 +465,11 @@ async def sync_folder(
                     Product.attributes.contains({"folder": folder_name}),
                 )
             )
-            for product in stale.scalars().all():
-                if product.id not in seen_product_ids:
-                    product.is_published = False
+            # Filtered single-channel sync must not unpublish the rest of the folder.
+            if not (telegram_id or channel_title):
+                for product in stale.scalars().all():
+                    if product.id not in seen_product_ids:
+                        product.is_published = False
 
             await session.commit()
 

@@ -20,3 +20,15 @@ def test_env_markup_defaults() -> None:
     s = get_settings()
     assert Decimal(str(s.default_markup_percent)) >= 0
     assert s.price_round_to >= 1
+
+
+def test_bot_token_strips_inline_env_comments(monkeypatch) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc          # comment")
+    monkeypatch.setenv("ADMIN_TELEGRAM_CHAT_ID", "299917270   # note")
+    get_settings.cache_clear()
+    try:
+        s = get_settings()
+        assert s.telegram_bot_token == "123:abc"
+        assert s.admin_telegram_chat_ids == ["299917270"]
+    finally:
+        get_settings.cache_clear()

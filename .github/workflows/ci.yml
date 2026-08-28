@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-python@82c7e76f4f1cf5d4e76d5aa83c6af0e4598d4e1d # v5.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Python tests
+        run: |
+          python -m pip install -U pip
+          pip install -r apps/api/requirements.txt -r apps/worker/requirements.txt
+          PYTHONPATH=. pytest apps/worker/tests apps/api/tests -q
+      - name: Web unit tests
+        run: node --experimental-strip-types --test apps/web/src/lib/telegramUser.test.ts apps/web/src/lib/apiBase.test.ts

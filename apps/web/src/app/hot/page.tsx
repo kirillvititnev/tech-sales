@@ -13,7 +13,7 @@ export default async function HotPage() {
     <main className="section">
       <h2>HOT</h2>
       <p className="lead">Горячие позиции по хорошей цене — ручной раздел витрины.</p>
-      <ProductGrid products={products} />
+      <ProductGrid products={products} emptyHref="/catalog" />
     </main>
   );
 }

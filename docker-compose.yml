@@ -2,30 +2,49 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-whiteshop}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-whiteshop}
-      POSTGRES_DB: ${POSTGRES_DB:-whiteshop}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whiteshop}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\""]
       interval: 5s
       timeout: 5s
       retries: 10
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api:
     build:
@@ -33,19 +52,26 @@ services:
       dockerfile: apps/api/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-whiteshop}:${POSTGRES_PASSWORD:-whiteshop}@postgres:5432/${POSTGRES_DB:-whiteshop}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - ./apps/api:/app/apps/api
-      - ./apps/worker:/app/apps/worker
       - ./data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   worker:
     build:
@@ -53,18 +79,25 @@ services:
       dockerfile: apps/worker/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-whiteshop}:${POSTGRES_PASSWORD:-whiteshop}@postgres:5432/${POSTGRES_DB:-whiteshop}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
     volumes:
-      - ./apps/api:/app/apps/api
-      - ./apps/worker:/app/apps/worker
       - ./data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # VLESS Reality client — only on VPS when Telegram is blocked.
   # Local (abroad): do not start. Keep TELEGRAM_PROXY empty.
@@ -76,25 +109,40 @@ services:
     volumes:
       - ./infra/vpn/xray.config.json:/etc/xray/config.json:ro
     ports:
-      # host ports for non-docker workers / debugging
-      - "10808:1080" # SOCKS5
-      - "10809:1081" # HTTP
-    # no published ports needed if only worker uses service DNS `xray:1080`
+      # host loopback only — not a public proxy
+      - "127.0.0.1:10808:1080" # SOCKS5
+      - "127.0.0.1:10809:1081" # HTTP
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   web:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
+      target: runner
+      args:
+        API_INTERNAL_URL: http://api:8000
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ""
+      API_INTERNAL_URL: http://api:8000
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
     ports:
-      - "3000:3000"
-    volumes:
-      - ./apps/web:/app
-      - /app/node_modules
-      - /app/.next
+      - "127.0.0.1:3000:3000"
     depends_on:
       - api
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:

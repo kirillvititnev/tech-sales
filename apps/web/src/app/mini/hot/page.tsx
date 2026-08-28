@@ -12,8 +12,8 @@ export default async function MiniHotPage() {
   return (
     <main className="section">
       <h2>HOT</h2>
-      <p className="lead">Горящие позиции.</p>
-      <ProductGrid products={products} hrefFor={(slug) => `/mini/product/${slug}`} />
+      <p className="lead">Горячие позиции.</p>
+      <ProductGrid products={products} productBasePath="/mini/product" emptyHref="/mini" />
     </main>
   );
 }

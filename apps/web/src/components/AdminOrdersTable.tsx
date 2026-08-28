@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import { API_URL, formatPrice, type Order } from "@/lib/api";
+import { adminFetch } from "@/lib/adminFetch";
 
 const CUSTOMER_RU: Record<string, string> = {
   placed: "Оформлен",
@@ -32,6 +33,7 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
   const [orders, setOrders] = useState(initialOrders);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const sorted = useMemo(() => orders, [orders]);
 
@@ -39,9 +41,8 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
     setBusy(order.id);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/orders/${order.id}/status`, {
+      const res = await adminFetch(`${API_URL}/api/v1/admin/orders/${order.id}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ admin_status }),
       });
       const data = await res.json().catch(() => ({}));
@@ -61,9 +62,8 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
     setBusy(order.id);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/orders/${order.id}/actions`, {
+      const res = await adminFetch(`${API_URL}/api/v1/admin/orders/${order.id}/actions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
       const data = await res.json().catch(() => ({}));
@@ -85,8 +85,9 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
       <table className="admin-table">
         <thead>
           <tr>
+            <th></th>
             <th>Номер</th>
-            <th>Клиент</th>
+            <th>Контакты</th>
             <th>Доставка</th>
             <th>Клиент</th>
             <th>Админ</th>
@@ -97,75 +98,118 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
         <tbody>
           {sorted.length === 0 ? (
             <tr>
-              <td colSpan={7}>Заказов пока нет</td>
+              <td colSpan={8}>Заказов пока нет</td>
             </tr>
           ) : (
             sorted.map((o) => {
-              const nxt = nextAdmin(o.admin_status);
+              const nxt = nextAdmin(o.admin_status ?? "");
               const disabled = busy === o.id || o.customer_status === "cancelled";
+              const open = openId === o.id;
+              const items = o.items ?? [];
               return (
-                <tr key={o.id}>
-                  <td>{o.number}</td>
-                  <td>
-                    {o.customer_name}
-                    <br />
-                    <span style={{ color: "var(--mute)" }}>{o.customer_phone}</span>
-                    {o.customer_telegram ? (
-                      <>
-                        <br />
-                        <span style={{ color: "var(--mute)" }}>{o.customer_telegram}</span>
-                      </>
-                    ) : null}
-                  </td>
-                  <td>
-                    {o.delivery_type === "cdek" ? "СДЭК" : "Москва"}
-                    {o.delivery_address ? (
-                      <>
-                        <br />
-                        <span style={{ color: "var(--mute)", fontSize: "0.85rem" }}>
-                          {o.delivery_address}
-                        </span>
-                      </>
-                    ) : null}
-                  </td>
-                  <td>{CUSTOMER_RU[o.customer_status] ?? o.customer_status}</td>
-                  <td>{ADMIN_RU[o.admin_status] ?? o.admin_status}</td>
-                  <td>{formatPrice(o.total_amount)}</td>
-                  <td>
-                    <div className="admin-actions">
-                      {nxt ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost admin-btn"
-                          disabled={disabled}
-                          onClick={() => patchStatus(o, nxt)}
-                        >
-                          → {ADMIN_RU[nxt]}
-                        </button>
+                <Fragment key={o.id}>
+                  <tr>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-ghost admin-btn"
+                        aria-expanded={open}
+                        onClick={() => setOpenId(open ? null : o.id)}
+                      >
+                        {open ? "▾" : "▸"}
+                      </button>
+                    </td>
+                    <td>{o.number}</td>
+                    <td>
+                      {o.customer_name}
+                      <br />
+                      <span style={{ color: "var(--mute)" }}>{o.customer_phone}</span>
+                      {o.customer_telegram ? (
+                        <>
+                          <br />
+                          <span style={{ color: "var(--mute)" }}>{o.customer_telegram}</span>
+                        </>
                       ) : null}
-                      {o.customer_status === "ready" || o.customer_status === "paid" ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost admin-btn"
-                          disabled={disabled}
-                          onClick={() => runAction(o, "issue")}
-                        >
-                          Выдан
-                        </button>
+                    </td>
+                    <td>
+                      {o.delivery_type === "cdek" ? "СДЭК" : "Москва"}
+                      {o.delivery_address ? (
+                        <>
+                          <br />
+                          <span style={{ color: "var(--mute)", fontSize: "0.85rem" }}>
+                            {o.delivery_address}
+                          </span>
+                        </>
                       ) : null}
-                      {o.customer_status !== "cancelled" && o.customer_status !== "issued" ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost admin-btn"
-                          disabled={disabled}
-                          onClick={() => runAction(o, "cancel")}
-                        >
-                          Отмена
-                        </button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
+                    </td>
+                    <td>{CUSTOMER_RU[o.customer_status] ?? o.customer_status}</td>
+                    <td>{ADMIN_RU[o.admin_status ?? ""] ?? o.admin_status}</td>
+                    <td>{formatPrice(o.total_amount)}</td>
+                    <td>
+                      <div className="admin-actions">
+                        {nxt ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost admin-btn"
+                            disabled={disabled}
+                            onClick={() => patchStatus(o, nxt)}
+                          >
+                            → {ADMIN_RU[nxt]}
+                          </button>
+                        ) : null}
+                        {o.customer_status === "ready" || o.customer_status === "paid" ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost admin-btn"
+                            disabled={disabled}
+                            onClick={() => runAction(o, "issue")}
+                          >
+                            Выдан
+                          </button>
+                        ) : null}
+                        {o.customer_status !== "cancelled" && o.customer_status !== "issued" ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost admin-btn"
+                            disabled={disabled}
+                            onClick={() => runAction(o, "cancel")}
+                          >
+                            Отмена
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                  {open ? (
+                    <tr className="admin-order-detail">
+                      <td colSpan={8}>
+                        <div className="admin-order-detail-inner">
+                          <p className="admin-order-detail-label">Состав</p>
+                          {items.length === 0 ? (
+                            <p style={{ color: "var(--mute)", margin: 0 }}>Позиции не загружены</p>
+                          ) : (
+                            <ul className="order-items" style={{ marginBottom: "0.75rem" }}>
+                              {items.map((item) => (
+                                <li key={item.id}>
+                                  {item.title} × {item.quantity} — {formatPrice(String(item.unit_price))}
+                                  {item.quantity > 1
+                                    ? ` (итого ${formatPrice(String(Number(item.unit_price) * item.quantity))})`
+                                    : null}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {o.comment ? (
+                            <>
+                              <p className="admin-order-detail-label">Комментарий</p>
+                              <p style={{ margin: 0 }}>{o.comment}</p>
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
               );
             })
           )}

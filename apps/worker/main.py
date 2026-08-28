@@ -17,6 +17,9 @@ async def parse_supplier_channels(ctx: dict) -> None:
 
 
 async def startup(ctx: dict) -> None:
+    from apps.api.security import assert_runtime_secrets
+
+    assert_runtime_secrets()
     settings = get_worker_settings()
     logger.info(
         "White Shop worker started (parse every %s min)",

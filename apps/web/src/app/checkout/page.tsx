@@ -1,38 +1,38 @@
+"use client";
+
 import Link from "next/link";
-import { notFound } from "next/navigation";
 
 import { CheckoutForm } from "@/components/CheckoutForm";
-import { api } from "@/lib/api";
+import { useCart } from "@/lib/cart";
 
-export default async function CheckoutPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ product?: string }>;
-}) {
-  const { product: slug } = await searchParams;
-  if (!slug) {
+export default function CheckoutPage() {
+  const { lines, ready } = useCart();
+
+  if (!ready) {
+    return (
+      <main className="section">
+        <h2>Оформление заказа</h2>
+        <p className="lead">Загрузка…</p>
+      </main>
+    );
+  }
+
+  if (!lines.length) {
     return (
       <main className="section">
         <h2>Оформление</h2>
-        <p className="lead">Выберите товар в каталоге, затем нажмите «Заказать».</p>
-        <Link href="/#catalog" className="btn btn-primary">
-          К каталогу
+        <p className="lead">Корзина пуста. Добавьте товары, затем оформите заказ.</p>
+        <Link href="/cart" className="btn btn-primary">
+          В корзину
         </Link>
       </main>
     );
   }
 
-  let product: Awaited<ReturnType<typeof api.product>>;
-  try {
-    product = await api.product(slug);
-  } catch {
-    notFound();
-  }
-
   return (
     <main className="section">
       <h2>Оформление заказа</h2>
-      <CheckoutForm product={product} />
+      <CheckoutForm items={lines} clearCartOnSuccess />
     </main>
   );
 }

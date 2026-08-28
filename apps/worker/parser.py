@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 
-from apps.worker.offer_identity import should_prepend_section
+from apps.worker.offer_identity import is_junk_section, should_prepend_section
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,49 @@ logger = logging.getLogger(__name__)
 # 17 Pro Max 256GB Blue 🇯🇵 (E-Sim) - 102800
 # 🇮🇳 17e 256GB Black    - 56 800
 # Ray-Ban Wayfarer ... - 39.000₽
+# Trailing region flag after price is common in Bests re:sale:
+#   S23 Plus 8/512GB Black — 42.800 🇦🇪
+_REGION_FLAG = r"[\U0001F1E6-\U0001F1FF]{2}"
 PRICE_LINE_RE = re.compile(
-    r"^(?P<title>.+?)\s*[-–—/|:]\s*(?P<price>\d[\d\s.]{0,20}?)\s*(?:₽|руб\.?|р\.?)?\s*$",
+    r"^(?P<title>.+?)\s*[-–—/|:]\s*(?P<price>\d[\d\s.]{0,20}?)\s*"
+    r"(?:₽|руб\.?|р\.?)?\s*"
+    rf"(?P<flag>{_REGION_FLAG})?\s*"
+    r"(?:[xх×]\s*\d+)?\s*$",
+    re.IGNORECASE,
+)
+# Global Market: "17 Pro Max 1TB Blue🇭🇰 148000" (flag glued to title, no dash)
+PRICE_LINE_FLAG_SPACE_RE = re.compile(
+    r"^(?P<title>.+?\d+\s*(?:GB|TB).*?)"
+    rf"(?P<flag>{_REGION_FLAG}(?:{_REGION_FLAG})?)\s+"
+    r"(?P<price>\d[\d\s.]{2,12})\s*"
+    r"(?:₽|руб\.?|р\.?)?\s*$",
     re.IGNORECASE,
 )
 
-HEADER_RE = re.compile(r"^(?:📦|📱|🎧|⌚️|💻)?\s*(?P<header>[A-Za-zА-Яа-я0-9].{2,80})$")
+HEADER_RE = re.compile(
+    r"^[^\wА-Яа-я]*?(?P<header>[A-Za-zА-Яа-я0-9].{1,80})$"
+)
+_YEAR_TOKEN_RE = re.compile(r"\b20\d{2}\b")
+_FAMILY_SECTION_RE = re.compile(r"(?i)\b(iphone|ipad|macbook|airpods|apple\s*watch|watch)\b")
+_SERIES_FRAGMENT_RE = re.compile(r"(?i)^(neo|air|pro|mini|max|ultra)$")
+
+
+def _is_section_header_line(line: str) -> bool:
+    """Allow product years and trailing colons (Global Market: `iPad 11 2025 Wi-Fi:`)."""
+    if line.endswith(":"):
+        return True
+    without_years = _YEAR_TOKEN_RE.sub("", line)
+    return not re.search(r"\d{3,}", without_years)
+
+
+def _merge_section(previous: str | None, candidate: str) -> str:
+    """`MacBook` + `Neo:` → `MacBook Neo` so RAM/color continuations still classify."""
+    frag = re.sub(r"[:.\s]+$", "", candidate).strip()
+    if previous and _SERIES_FRAGMENT_RE.fullmatch(frag):
+        prev_clean = previous.rstrip(" :")
+        if _FAMILY_SECTION_RE.search(prev_clean) and frag.lower() not in prev_clean.lower():
+            return f"{prev_clean} {frag.title()}"
+    return candidate
 
 
 @dataclass
@@ -81,10 +118,21 @@ def parse_price_text(text: str) -> list[ParsedLine]:
         if not line or line.startswith("#") or set(line) <= {"-", "—", "–", "=", "_", "•"}:
             continue
 
-        match = PRICE_LINE_RE.match(line)
+        match = PRICE_LINE_RE.match(line) or PRICE_LINE_FLAG_SPACE_RE.match(line)
         if match:
             title = match.group("title").strip()
-            title = re.sub(r"^[^\wА-Яа-я]+", "", title).strip()
+            # Keep leading region flags (🇺🇸); only strip bullets / junk symbols
+            title = re.sub(
+                r"^(?:[^\wА-Яа-я\U0001F1E6-\U0001F1FF]+)+",
+                "",
+                title,
+            ).strip()
+            # Drop leading "Прайс" glued into the price line itself
+            title = re.sub(r"(?i)^\s*прайс\s+", "", title).strip()
+            # Bests-style flag after price → keep on title for region/SIM
+            flag = match.group("flag")
+            if flag and not re.search(r"[\U0001F1E6-\U0001F1FF]", title):
+                title = f"{title} {flag}".strip()
             price = parse_price_token(match.group("price"))
             if price is None or not title:
                 continue
@@ -97,10 +145,13 @@ def parse_price_text(text: str) -> list[ParsedLine]:
             continue
 
         # Section header without price (e.g. "📦 iPhone 17 Pro Max")
-        if not re.search(r"\d{3,}", line):
+        if _is_section_header_line(line):
             header = HEADER_RE.match(line)
             if header:
-                section = re.sub(r"^[^\wА-Яа-я]+", "", header.group("header")).strip()
+                candidate = re.sub(r"^[^\wА-Яа-я]+", "", header.group("header")).strip()
+                # Never treat logistics / "Прайс …" banners as product sections
+                if candidate and not is_junk_section(candidate):
+                    section = _merge_section(section, candidate)
     return results
 
 

@@ -122,7 +122,7 @@ class StoreSettings(Base):
     __tablename__ = "store_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    default_markup_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=Decimal("10"))
+    default_markup_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=Decimal("0"))
     price_round_to: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

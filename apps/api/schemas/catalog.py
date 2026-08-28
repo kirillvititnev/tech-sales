@@ -2,7 +2,11 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from apps.api.security import public_product_attributes
 
 
 class CategoryOut(BaseModel):
@@ -25,7 +29,12 @@ class ProductOut(BaseModel):
     price: Decimal | None
     is_hot: bool
     image_url: str | None
-    attributes: dict = Field(default_factory=dict)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("attributes", mode="before")
+    @classmethod
+    def strip_internal_attributes(cls, value: Any) -> dict[str, Any]:
+        return public_product_attributes(value if isinstance(value, dict) else {})
 
 
 class ProductDetailOut(ProductOut):
@@ -36,9 +45,9 @@ class ProductDetailOut(ProductOut):
 
 
 class ChannelCreate(BaseModel):
-    title: str
-    telegram_id: str
-    username: str | None = None
+    title: str = Field(min_length=1, max_length=255)
+    telegram_id: str = Field(min_length=1, max_length=128)
+    username: str | None = Field(default=None, max_length=128)
     is_private: bool = False
 
 
@@ -114,3 +123,32 @@ class StoreSettingsOut(BaseModel):
 class StoreSettingsUpdate(BaseModel):
     default_markup_percent: Decimal | None = Field(default=None, ge=0, le=100)
     price_round_to: int | None = Field(default=None, ge=1, le=10000)
+
+
+class SuggestItemOut(BaseModel):
+    slug: str
+    title: str
+    brand: str | None = None
+    price: Decimal | None = None
+    device_category: str | None = None
+    device_name: str | None = None
+
+    @field_validator("device_category", "device_name", mode="before")
+    @classmethod
+    def nonempty_str(cls, value: Any) -> str | None:
+        if isinstance(value, str) and value.strip():
+            return value
+        return None
+
+
+class FacetValueOut(BaseModel):
+    value: str
+    count: int
+
+
+class CatalogFacetsOut(BaseModel):
+    brands: list[FacetValueOut]
+    device_categories: list[FacetValueOut]
+    price_min: Decimal | None = None
+    price_max: Decimal | None = None
+    total: int = 0

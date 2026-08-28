@@ -20,11 +20,13 @@ from apps.api.schemas.catalog import (
     StoreSettingsOut,
     StoreSettingsUpdate,
 )
-from apps.api.schemas.order import AdminOrderAction, AdminOrderStatusUpdate, OrderOut
+from apps.api.schemas.order import AdminOrderAction, AdminOrderOut, AdminOrderStatusUpdate
 from apps.api.services.admin_catalog import get_or_create_store_settings, slugify_manual
 from apps.api.services.orders import apply_admin_status, cancel_order, mark_issued
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+from apps.api.security import require_admin
+
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 def _orders_query():
@@ -196,13 +198,13 @@ async def product_offers(
     ]
 
 
-@router.get("/orders", response_model=list[OrderOut])
+@router.get("/orders", response_model=list[AdminOrderOut])
 async def list_orders(db: AsyncSession = Depends(get_db)) -> list[Order]:
     result = await db.execute(_orders_query().order_by(Order.created_at.desc()).limit(100))
     return list(result.scalars().all())
 
 
-@router.get("/orders/{order_id}", response_model=OrderOut)
+@router.get("/orders/{order_id}", response_model=AdminOrderOut)
 async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)) -> Order:
     result = await db.execute(_orders_query().where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -211,7 +213,7 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)) ->
     return order
 
 
-@router.patch("/orders/{order_id}/status", response_model=OrderOut)
+@router.patch("/orders/{order_id}/status", response_model=AdminOrderOut)
 async def update_admin_status(
     order_id: UUID,
     payload: AdminOrderStatusUpdate,
@@ -240,7 +242,7 @@ async def update_admin_status(
     return loaded.scalar_one()
 
 
-@router.post("/orders/{order_id}/actions", response_model=OrderOut)
+@router.post("/orders/{order_id}/actions", response_model=AdminOrderOut)
 async def order_action(
     order_id: UUID,
     payload: AdminOrderAction,
