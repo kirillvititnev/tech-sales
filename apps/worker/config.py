@@ -15,7 +15,8 @@ class WorkerSettingsEnv(BaseSettings):
     telegram_session_path: str = "./data/telegram.session"
     telegram_proxy: str | None = None
     parse_interval_minutes: int = 15
-    default_markup_percent: float = 10.0
+    # Temporary: storefront shows supplier median (no markup) until pricing strategy returns.
+    default_markup_percent: float = 0.0
     price_round_to: int = 100
     min_offer_price_rub: int = 6000
 

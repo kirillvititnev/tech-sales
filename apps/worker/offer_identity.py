@@ -131,7 +131,8 @@ EMBEDDED_PRICE_RE = re.compile(r"\b\d{1,3}(?:[.\s]\d{3}){1,2}\b")
 NON_APPLE_PHONE_RE = re.compile(
     r"(?i)\b("
     r"samsung|galaxy|oneplus|one\s*plus|xiaomi|redmi|poco|honor|huawei|"
-    r"nothing(?:\s*phone)?|pixel|realme|oppo|vivo|motorola|iqoo|tecno|"
+    r"nothing(?:\s*phone)?|pixel|realme|oppo|vivo|motorola|moto|iqoo|tecno|"
+    r"infinix|asus|nokia|"
     r"z\s*fold|z\s*flip|tab\s*s\d|sm-[a-z0-9]+"
     r")\b",
 )
@@ -235,6 +236,26 @@ COLOR_ALIASES = {
     "kim kardashian dune": "Kim Kardashian Dune",
     "kim kardashian moon": "Kim Kardashian Moon",
     "tan": "Tan",
+    # Samsung A-series OEM
+    "awesome lime": "Awesome Lime",
+    "lime": "Lime",
+    # Pixel 7a OEM
+    "coral": "Coral",
+    # Bang & Olufsen / Bowers & Wilkins OEM finishes
+    "chestnut": "Chestnut",
+    "anthracite": "Anthracite",
+    "dark forest": "Dark Forest",
+    "royal burgundy": "Royal Burgundy",
+    # OnePlus Buds 4 OEM
+    "storm gray": "Storm Gray",
+    "storm grey": "Storm Gray",
+    "zen green": "Zen Green",
+    # Realme / Huawei Unisale finishes
+    "glacier blue": "Glacier Blue",
+    "blaze purple": "Blaze Purple",
+    "blush gold": "Blush Gold",
+    "graphite black": "Graphite Black",
+    "orange ocean": "Orange Ocean",
 }
 
 # Multi-word colors first (Deep Blue must not collapse to Blue)
@@ -250,6 +271,9 @@ COLOR_MULTI_RE = re.compile(
     r"lunar\s+radiance|midnight\s+opus|"
     r"quick\s+sand|deep\s+plum|driftwood\s+sand|"
     r"kim\s+kardashian\s+dune|kim\s+kardashian\s+moon|"
+    r"awesome\s+lime|dark\s+forest|royal\s+burgundy|"
+    r"storm\s+gr[ae]y|zen\s+green|glacier\s+blue|"
+    r"blaze\s+purple|blush\s+gold|graphite\s+black|orange\s+ocean|"
     r"black\s+titanium|natural\s+titanium|white\s+titanium|desert\s+titanium|"
     r"blue\s+titanium|"
     r"titanium\s+black|titanium\s+gr[ae]y|"
@@ -263,7 +287,8 @@ COLOR_SINGLE_RE = re.compile(
     r"yellow|ultramarine|sage|mist|starlight|midnight|desert|mint|navy|"
     r"gray|grey|violet|lavender|teal|orange|cream|obsidian|blush|indigo|citrus|camo|"
     r"olive|graphite|porcelain|terracotta|beige|brown|lilac|charcoal|graygreen|"
-    r"jetblack|pistachio|sandstorm|sand|squad|funky|mustard|sandstone|tan"
+    r"jetblack|pistachio|sandstorm|sand|squad|funky|mustard|sandstone|tan|"
+    r"coral|chestnut|anthracite|lime"
     r")\b",
 )
 
@@ -412,7 +437,7 @@ APPLE_OTHER_META: dict[str, tuple[str, str, str]] = {
 
 
 CONTINUATION_START_RE = re.compile(
-    r"^(?:\d+\s*(?:gb|tb)\b|\(|e-?sim|sim\+|black|white|blue|titanium|natural)",
+    r"^(?:\d{1,2}\s*/\s*\d+\s*(?:gb|tb)\b|\d+\s*(?:gb|tb)\b|\(|e-?sim|sim\+|black|white|blue|titanium|natural)",
     re.I,
 )
 
@@ -435,7 +460,8 @@ JUNK_RE = re.compile(
     r"\bвитрин|"
     r"\bрассрочк|"
     r"\bпредзаказ\b|"
-    r"\bпод\s*заказ\b"
+    r"\bпод\s*заказ\b|"
+    r"\bfitbit\b"
     r")"
 )
 
@@ -487,7 +513,7 @@ MODEL_SECTION_RE = re.compile(
     r"dyson|playstation|ps\s*[45]|ray-?ban|insta\s*360|insta360|"
     r"яндекс|yandex|xbox|nintendo|oculus|logitech|steam|"
     r"buds|airwrap|supersonic|airstrait|"
-    r"hd\d+|hs\d+|galaxy\s*watch|watch\s*8"
+    r"hd\d+|hs\d+|galaxy\s*watch|watch\s*8|\bneo\b"
     r")\b",
 )
 
@@ -711,9 +737,9 @@ def asis_tier(title: str) -> str | None:
 
 def category_for_phone(*, asis_tier_name: str | None) -> str:
     if asis_tier_name == "asis+":
-        return "Asis+*"
+        return "Смартфоны ASIS+"
     if asis_tier_name == "asis":
-        return "Asis*"
+        return "Смартфоны ASIS"
     return "Смартфоны"
 
 
@@ -922,6 +948,21 @@ def normalize_galaxy_a_color(model: str, color: str) -> str:
         }
         return mapping.get(key, "")
 
+    if series == "a36":
+        mapping = {
+            "lime": "Awesome Lime",
+            "awesome lime": "Awesome Lime",
+            "black": "Awesome Black",
+            "awesome black": "Awesome Black",
+            "white": "Awesome White",
+            "awesome white": "Awesome White",
+            "gray": "Awesome Light Gray",
+            "grey": "Awesome Light Gray",
+            "light gray": "Awesome Light Gray",
+            "awesome light gray": "Awesome Light Gray",
+        }
+        return mapping.get(key, color)
+
     if series in {"a17", "a16", "a07", "a06", "a05"}:
         mapping = {
             "black": "Black",
@@ -968,6 +1009,9 @@ def normalize_base_17_color(model: str, color: str) -> str:
     return mapping.get(key, "")
 
 
+# Global Market uses `S/M` / `M/L` without parentheses (Bests uses `(L/M)`).
+_WATCH_FIT = r"(?:S\s*/\s*M|M\s*/\s*L|L\s*/\s*M|[SML])"
+
 WATCH_BAND_RE = re.compile(
     r"(?i)(?P<band>"
     r"(?:(?:black|natural|white)\s*ti(?:tanium)?|black|white|natural|blue|silver|gold|"
@@ -977,8 +1021,12 @@ WATCH_BAND_RE = re.compile(
     r"(?:milanese\s*loop|trail\s*loop|alpine\s*loop|ocean\s*band|sport\s*band|"
     r"sport\s*loop|braided\s*solo\s*loop|solo\s*loop|nike\s*(?:sport\s*)?band|"
     r"link\s*bracelet|bright\s*loop|charcoal\s*loop)"
-    r"(?:\s*\([^)]+\))?"
+    r"(?:\s*\(?\s*" + _WATCH_FIT + r"\s*\)?)?"
     r")\s*$",
+)
+
+WATCH_FIT_ONLY_RE = re.compile(
+    r"(?i)\s+\(?\s*(?P<fit>S\s*/\s*M|M\s*/\s*L|L\s*/\s*M)\s*\)?\s*$",
 )
 
 WATCH_ULTRA_RE = re.compile(r"(?i)\b(?:apple\s*watch\s+)?ultra\s*(?P<gen>[23])\b")
@@ -1078,12 +1126,18 @@ def parse_apple_watch(title: str) -> tuple[str, str, str, str] | None:
     if re.search(r"(?i)\bgalaxy\b", title) and re.search(r"(?i)\bwatch\b", title):
         return None
     band = ""
-    band_m = WATCH_BAND_RE.search(title.strip())
-    head = title[: band_m.start()].strip() if band_m else title
+    raw_title = title.strip()
+    band_m = WATCH_BAND_RE.search(raw_title)
+    head = raw_title[: band_m.start()].strip() if band_m else raw_title
     if band_m:
         band = normalize_milanese_band(
             expand_watch_ti(re.sub(r"\s+", " ", band_m.group("band")).strip())
         )
+    else:
+        fit_m = WATCH_FIT_ONLY_RE.search(raw_title)
+        if fit_m:
+            band = re.sub(r"\s+", "", fit_m.group("fit")).upper()
+            head = raw_title[: fit_m.start()].strip()
 
     ultra = WATCH_ULTRA_RE.search(head)
     if ultra:
@@ -1105,6 +1159,7 @@ def parse_apple_watch(title: str) -> tuple[str, str, str, str] | None:
 
     sm = re.search(
         r"(?i)\b(?:apple\s*watch\s+)?(?P<gen>se\s*[23]|s(?:1[0-9]|[1-9]))\b"
+        r"(?:\s*20\d{2})?"
         r"(?:\s*(?P<size>\d{2})\s*mm)?",
         head,
     )
@@ -1335,32 +1390,27 @@ def _apple_other_device_name(token: str, working: str) -> tuple[str, str, str, s
     bits = [
         b
         for b in tail.split()
-        if b.lower() not in {"apple", "the", "and", "для", "wi", "fi", "wifi"}
+        if b.lower() not in {"apple", "the", "and", "для", "wi", "fi", "wifi", "lte"}
+        and b not in {"+", "/"}
     ][:4]
     device_name = prefix if not bits else f"{prefix} {' '.join(bits)}"
     device_name = collapse_duplicate_tokens(device_name)
     device_name = re.sub(r"\banc\b", "ANC", device_name, flags=re.I)
     device_name = re.sub(r"\busb[\s\-]?c\b", "USB-C", device_name, flags=re.I)
     if key == "macbook":
-        # MacBook Neo: normalize "13 Neo A18Pro" → "MacBook Neo 13 A18 Pro"
+        # MacBook Neo is its own line (A18…), never M-series Air/Pro chips.
         if re.search(r"(?i)\bneo\b", working):
             size_m = re.search(r"(?i)(?:\bneo\s*(1[3-6])\b|\b(1[3-6])\s*neo\b)", working)
-            chip_m = re.search(r"(?i)\b(a\d{2})\s*(pro)?\b|\bm(\d+)(?:\s*(pro|max|ultra))?\b", working)
+            chip_m = re.search(r"(?i)\b(a\d{2})\s*(pro)?\b", working)
             year_m = re.search(r"(?i)\bneo\s*(20\d{2})\b", working)
             parts = ["MacBook", "Neo"]
             if size_m:
                 parts.append(size_m.group(1) or size_m.group(2))
             if chip_m:
-                if chip_m.group(1):
-                    chip = chip_m.group(1).upper()
-                    if chip_m.group(2):
-                        chip = f"{chip} Pro"
-                    parts.append(chip)
-                else:
-                    chip = f"M{chip_m.group(3)}"
-                    if chip_m.group(4):
-                        chip = f"{chip} {chip_m.group(4).title()}"
-                    parts.append(chip)
+                chip = chip_m.group(1).upper()
+                if chip_m.group(2):
+                    chip = f"{chip} Pro"
+                parts.append(chip)
             if year_m:
                 parts.append(year_m.group(1))
             device_name = " ".join(parts)
@@ -1386,6 +1436,9 @@ def _apple_other_device_name(token: str, working: str) -> tuple[str, str, str, s
         )
     if key == "ipad":
         device_name = re.sub(r"(?i)\b(air|pro)\s+\1\b", r"\1", device_name)
+        conn = _extract_connectivity(working)
+        if conn and conn.lower() not in device_name.lower():
+            device_name = f"{device_name} {conn}".strip()
     device_name = scrub_spec_leaks(device_name)
     device_name = collapse_duplicate_tokens(device_name)
     model_key = device_name.lower()
@@ -1405,7 +1458,8 @@ def should_prepend_section(section: str | None, title: str) -> bool:
         return False
     if is_junk_section(section):
         return False
-    # Only glue product-model sections (Top re:sale: "IPhone 16:"), never banners.
+    if re.search(r"(?i)\bairpods\b", section) and re.search(r"(?i)\bfitbit\b", title):
+        return False
     if not MODEL_SECTION_RE.search(section):
         return False
     if section.lower().rstrip(":").strip() in title.lower():
@@ -1710,6 +1764,10 @@ def _title_case_device(text: str) -> str:
             parts.append("Wi-Fi")
         elif w.lower() in {"plus", "pro", "max", "ultra", "lite", "mini", "note", "pad"}:
             parts.append(w.title())
+        elif w.lower() == "gt":
+            parts.append("GT")
+        elif w.lower() == "xt":
+            parts.append("XT")
         elif w.lower() == "5g":
             parts.append("5G")
         elif w.lower() == "4g":
@@ -1722,28 +1780,45 @@ def _title_case_device(text: str) -> str:
 
 
 def _extract_connectivity(title: str) -> str:
-    if re.search(r"(?i)\bwi-?fi\b", title):
+    # Suppliers often use U+2011 non-breaking hyphen in "Wi‑Fi"
+    normalized = (
+        title.replace("\u2011", "-")
+        .replace("\u2010", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\xa0", " ")
+    )
+    has_wifi = bool(re.search(r"(?i)\bwi-?fi\b", normalized))
+    has_lte = bool(re.search(r"(?i)\blte\b|\bcellular\b", normalized))
+    has_4g = bool(re.search(r"(?i)\b4g\b", normalized))
+    if has_wifi and (has_lte or has_4g):
+        return "Wi-Fi + LTE"
+    if has_wifi:
         return "Wi-Fi"
-    if re.search(r"(?i)\b4g\b", title):
-        return "4G"
-    if re.search(r"(?i)\blte\b", title):
+    if has_lte:
         return "LTE"
+    if has_4g:
+        return "4G"
     return ""
 
 
 def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
     """Return (brand, category, device_name, model_key, color, connectivity) or None."""
     raw = re.sub(r"\s+", " ", title.strip())
-    # Tecno Unisale: "Tecno 40 Camon" → "Tecno Camon 40"
-    raw = re.sub(r"(?i)\b(tecno)\s+(\d+)\s+(camon)\b", r"\1 \3 \2", raw)
+    # Tecno Unisale: "Tecno 40 Camon" → "Tecno Camon 40"; "Tecno 8 Phantom" → "Tecno Phantom 8"
+    raw = re.sub(r"(?i)\b(tecno)\s+(\d+)\s+(camon|phantom)\b", r"\1 \3 \2", raw)
     m = re.search(
         r"(?i)\b(?P<brand>"
         r"huawei|honor|xiaomi|redmi|poco|google\s*pixel|pixel|"
-        r"realme|one\s*plus|oneplus|nothing(?:\s*phone)?|tecno"
+        r"realme|one\s*plus|oneplus|nothing(?:\s*phone)?|tecno|"
+        r"oppo|vivo|motorola|moto|iqoo|infinix|asus|nokia"
         r")\b",
         raw,
     )
     if not m:
+        return None
+    # Handhelds are not phones — leave to parse_gaming
+    if re.search(r"(?i)\brog\s*ally\b", raw):
         return None
     brand_raw = re.sub(r"\s+", " ", m.group("brand").strip().lower())
     brand_map = {
@@ -1760,6 +1835,14 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
         "nothing": "Nothing",
         "nothing phone": "Nothing",
         "tecno": "Tecno",
+        "oppo": "Oppo",
+        "vivo": "Vivo",
+        "motorola": "Motorola",
+        "moto": "Motorola",
+        "iqoo": "iQOO",
+        "infinix": "Infinix",
+        "asus": "Asus",
+        "nokia": "Nokia",
     }
     brand = brand_map.get(brand_raw, brand_raw.title())
     rest = raw[m.start() :].strip()
@@ -1771,6 +1854,13 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
     rest = re.sub(r"(?i)\bnothing\s+phone\b", "Nothing Phone", rest)
     rest = re.sub(r"(?i)\brealme\b", "Realme", rest)
     rest = re.sub(r"(?i)\btecno\b", "Tecno", rest)
+    rest = re.sub(r"(?i)\boppo\b", "Oppo", rest)
+    rest = re.sub(r"(?i)\bvivo\b", "Vivo", rest)
+    rest = re.sub(r"(?i)\b(?:motorola|moto)\b", "Motorola", rest)
+    rest = re.sub(r"(?i)\biqoo\b", "iQOO", rest)
+    rest = re.sub(r"(?i)\binfinix\b", "Infinix", rest)
+    rest = re.sub(r"(?i)\basus\b", "Asus", rest)
+    rest = re.sub(r"(?i)\bnokia\b", "Nokia", rest)
 
     connectivity = _extract_connectivity(rest)
     color = extract_color(rest)
@@ -1796,7 +1886,24 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
     if color:
         device_body = re.sub(rf"(?i)\b{re.escape(color)}\b", " ", device_body)
         # Also strip multi-word OEM aliases that extract_color resolved
-        for alias in ("lake cyan", "guava soda", "lemongrass", "jet black", "chalk white"):
+        for alias in (
+            "lake cyan",
+            "guava soda",
+            "lemongrass",
+            "jet black",
+            "chalk white",
+            "awesome lime",
+            "dark forest",
+            "royal burgundy",
+            "glacier blue",
+            "blaze purple",
+            "blush gold",
+            "graphite black",
+            "orange ocean",
+            "storm gray",
+            "storm grey",
+            "zen green",
+        ):
             device_body = re.sub(rf"(?i)\b{alias}\b", " ", device_body)
     device_body = re.sub(r"(?i)\b(wi-?fi|4g|lte)\b", " ", device_body)
     head = body[: cut if cut is not None else len(body)]
@@ -1808,7 +1915,26 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
     device_body = re.sub(r"(?i)\bplus\b", "Plus", device_body)
     device_name = _title_case_device(device_body)
     # Brand casing
-    for b in ("Huawei", "Honor", "Xiaomi", "Redmi", "Poco", "Pixel", "Realme", "OnePlus", "Nothing", "Tecno", "Phone"):
+    for b in (
+        "Huawei",
+        "Honor",
+        "Xiaomi",
+        "Redmi",
+        "Poco",
+        "Pixel",
+        "Realme",
+        "OnePlus",
+        "Nothing",
+        "Tecno",
+        "Oppo",
+        "Vivo",
+        "Motorola",
+        "iQOO",
+        "Infinix",
+        "Asus",
+        "Nokia",
+        "Phone",
+    ):
         device_name = re.sub(rf"(?i)\b{b}\b", b, device_name)
     if brand == "Google" and not device_name.lower().startswith("pixel"):
         device_name = f"Pixel {device_name}".strip()
@@ -1818,6 +1944,12 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
         device_name = collapse_duplicate_tokens(device_name)
     if brand == "OnePlus":
         device_name = re.sub(r"(?i)^oneplus\b", "OnePlus", device_name)
+    device_name = re.sub(r"(?i)\bpromax\b", "Pro Max", device_name)
+    device_name = re.sub(r"(?i)\bmate\s+xt\b", "Mate XT", device_name)
+    # "Realme GT 7 GT" / "Realme Note 60x Note" — family token repeated after the number
+    device_name = re.sub(r"(?i)\b(GT)\s+(\d+\w*)\s+\1\b", r"\1 \2", device_name)
+    device_name = re.sub(r"(?i)\b(Note)\s+(\d+\w*)\s+\1\b", r"\1 \2", device_name)
+    device_name = collapse_duplicate_tokens(device_name)
 
     is_pad = bool(re.search(r"(?i)\b(pad|matepad|tablet)\b", device_name))
     category = "Планшеты" if is_pad else "Смартфоны"
@@ -1840,6 +1972,14 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
             "sandstorm": "Sand Storm",
             "obsidian": "Obsidian",
             "hazel": "Hazel",
+            "coral": "Coral",
+            "awesome lime": "Awesome Lime",
+            "lime": "Lime",
+            "glacier blue": "Glacier Blue",
+            "blaze purple": "Blaze Purple",
+            "blush gold": "Blush Gold",
+            "graphite black": "Graphite Black",
+            "orange ocean": "Orange Ocean",
         }
         for alias, finish in android_color_map.items():
             if alias in {"lemongrass", "snow", "hazel"} and brand != "Google":
@@ -1854,6 +1994,14 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
 def parse_gaming(title: str) -> tuple[str, str, str, str, str, str] | None:
     """Return (brand, category, device_name, model_key, color, storage) or None."""
     raw = re.sub(r"\s+", " ", title.strip())
+
+    # ASUS ROG Ally — Unisale writes "Ally XBOX" for Ally X (must win over Xbox)
+    if re.search(r"(?i)\brog\s*ally\b", raw):
+        storage = extract_storage(raw)
+        color = extract_color(raw)
+        is_x = bool(re.search(r"(?i)\bally\s*x\b|\bxbox\b", raw))
+        device_name = "Asus ROG Ally X" if is_x else "Asus ROG Ally"
+        return "Asus", "Игровые консоли", device_name, device_name.lower(), color or "", storage
 
     if re.search(r"(?i)\bxbox\b", raw):
         storage = extract_storage(raw)
@@ -1933,7 +2081,7 @@ def parse_dyson(title: str) -> tuple[str, str, str, str, str] | None:
         re.search(
             r"(?i)\b("
             r"dyson|airwrap|supersonic|airstrait|pencilvac|cinetic|"
-            r"hushjet|wash\s*g\d|"
+            r"hushjet|wash\s*g\d|big\s*ball|"
             r"hd\d+|hs\d+|ht\d+|sv\d+|ph\d+|tp\d+|hu\d+|ds\d+|am\d+|"
             r"v(?:8|10|11|12|15|16)s?\b|gen\s*5\s*detect"
             r")\b",
@@ -1949,14 +2097,15 @@ def parse_dyson(title: str) -> tuple[str, str, str, str, str] | None:
     # require Dyson brand or known product family tokens
     if not re.search(
         r"(?i)\b(dyson|airwrap|supersonic|airstrait|pencilvac|cinetic|hushjet|"
-        r"detect|absolute|fluffy|piston|submarine|hd\d+|hs\d+|ht\d+|ph\d+|tp\d+|hu\d+|am\d+)\b",
+        r"detect|absolute|fluffy|piston|submarine|big\s*ball|"
+        r"hd\d+|hs\d+|ht\d+|ph\d+|tp\d+|hu\d+|am\d+)\b",
         raw,
     ):
         return None
     # Must have a concrete model token (not bare "Dyson" / "Стайлер Dyson")
     if not re.search(
         r"(?i)\b("
-        r"airwrap|supersonic|airstrait|pencilvac|cinetic|hushjet|wash\s*g\d|"
+        r"airwrap|supersonic|airstrait|pencilvac|cinetic|hushjet|wash\s*g\d|big\s*ball|"
         r"hd\d+|hs\d+|ht\d+|sv\d+|ph\d+|tp\d+|hu\d+|ds\d+|am\d+|"
         r"v(?:8|10|11|12|15|16)s?\b|gen\s*5"
         r")\b",
@@ -1980,6 +2129,7 @@ def parse_dyson(title: str) -> tuple[str, str, str, str, str] | None:
     t = re.sub(r"(?i)\bpiston\b", "Piston", t)
     t = re.sub(r"(?i)\banimal\b", "Animal", t)
     t = re.sub(r"(?i)\bsubmarine\b", "Submarine", t)
+    t = re.sub(r"(?i)\bbig\s*ball\b", "Big Ball", t)
     t = re.sub(r"(?i)\b(?:с\s+)?(?:кейсом|диффузором)\b", " ", t)
     t = re.sub(r"\([^)]*\)", " ", t)
     t = re.sub(r"\s+", " ", t).strip(" -–—/")
@@ -2029,12 +2179,16 @@ def parse_dyson(title: str) -> tuple[str, str, str, str, str] | None:
     device_name = re.sub(r"(?i)\bam(\d+)\b", lambda m: f"AM{m.group(1)}", device_name)
     device_name = re.sub(r"(?i)\bv(\d+)(s?)\b", lambda m: f"V{m.group(1)}{m.group(2).lower()}", device_name)
 
-    low = device_name.lower()
-    if any(x in low for x in ("airwrap", "supersonic", "airstrait")):
+    # HD = Supersonic hair dryer; HT = Airstrait straightener; HS = Airwrap
+    if re.search(r"(?i)\bhd\d+\b", device_name) or re.search(r"(?i)\bsupersonic\b", device_name):
+        category = "Фены"
+    elif re.search(r"(?i)\bht\d+\b", device_name) or re.search(r"(?i)\bairstrait\b", device_name):
+        category = "Выпрямители"
+    elif re.search(r"(?i)\bhs\d+\b", device_name) or re.search(r"(?i)\bairwrap\b", device_name):
         category = "Стайлеры"
     elif re.search(r"(?i)\bam\d+\b", device_name):
         category = "Вентиляторы"
-    elif any(x in low for x in ("ph", "tp", "hu", "hushjet", "воздухо")):
+    elif re.search(r"(?i)\b(?:ph\d+|tp\d+|hu\d+|hushjet)\b", device_name) or "воздухо" in device_name.lower():
         category = "Воздухоочистители"
     else:
         category = "Пылесосы"
@@ -2517,11 +2671,27 @@ def parse_camera(title: str) -> tuple[str, str, str, str, str, str] | None:
             t = f"Canon {t}"
         return "Canon", "Фото", t, t.lower(), color or "", ""
 
+    # --- Kodak Charmera (retro keychain cameras; Unisale action-cam section) ---
+    if re.search(r"(?i)\bcharmera\b", raw):
+        extra = ""
+        pm = re.search(r"\(\+?\s*([^)]+)\)", raw)
+        if pm:
+            extra = pm.group(1).strip()
+            raw = re.sub(r"\s+", " ", (raw[: pm.start()] + " " + raw[pm.end() :]).strip())
+        if re.search(r"(?i)\b2000\b", raw):
+            device_name = "Kodak Charmera 2000"
+            if re.search(r"(?i)\bmillennium\b", raw) and "millennium" not in extra.lower():
+                extra = " · ".join(x for x in [extra, "Millennium"] if x)
+        else:
+            device_name = "Kodak Charmera 1987"
+        return "Kodak", "Фото", device_name, device_name.lower(), "", extra
+
     return None
 
 
 # Insta360 model bodies (order: longer phrases first)
 _INSTA360_BODY = (
+    r"luna\s*ultra|"
     r"ace\s*pro\s*2|ace\s*pro|ace|"
     r"go\s*ultra|go\s*3s|go\s*3|go\s*2|"
     r"one\s*rs|one\s*x\s*2|one\s*x2|"
@@ -2540,6 +2710,7 @@ def _format_insta360_body(body: str) -> str:
     b = re.sub(r"\s+", " ", body.strip().lower())
     b = re.sub(r"^x\s*([2-5])$", r"X\1", b)
     mapping = {
+        "luna ultra": "Luna Ultra",
         "ace pro 2": "Ace Pro 2",
         "ace pro": "Ace Pro",
         "ace": "Ace",
@@ -2564,28 +2735,33 @@ def _format_insta360_body(body: str) -> str:
     return b.title()
 
 
-def parse_insta360(title: str) -> tuple[str, str, str, str, str] | None:
-    """Return (brand, category, device_name, model_key, color) or None."""
+def parse_insta360(title: str) -> tuple[str, str, str, str, str, str] | None:
+    """Return (brand, category, device_name, model_key, color, extra) or None."""
     raw = re.sub(r"\s+", " ", title.strip())
     # Glued supplier forms: "360x5" / "insta360x5"
     raw = re.sub(r"(?i)(360)\s*(x\s*[2-5])", r"\1 \2", raw)
     raw = re.sub(r"(?i)\binsta360(?=x)", "Insta360 ", raw)
+    extra = ""
+    pm = re.search(r"\(([^)]+)\)", raw)
+    if pm:
+        extra = pm.group(1).strip()
+        raw = re.sub(r"\s+", " ", (raw[: pm.start()] + " " + raw[pm.end() :]).strip())
     m = INSTA360_RE.search(raw)
     if not m:
         return None
     model_part = _format_insta360_body(m.group("body"))
     device_name = f"Insta360 {model_part}"
-    # Optional color after model
-    color = ""
-    tail = raw[m.end() :].strip(" -–—/:|")
-    if tail:
-        cm = re.match(r"(?i)^(black|white|grey|gray|silver|blue|orange|standard)\b", tail)
-        if cm:
-            color = COLOR_ALIASES.get(cm.group(1).lower(), cm.group(1).title())
-            if color.lower() == "gray":
-                color = "Grey"
+    color = extract_color(raw[m.end() :]) or extract_color(raw)
+    if color and color.lower() == "gray":
+        color = "Grey"
+    # OEM Luna Ultra finishes: Cosmic Black / Stellar White
+    if model_part == "Luna Ultra":
+        if color.lower() == "black":
+            color = "Cosmic Black"
+        elif color.lower() == "white":
+            color = "Stellar White"
     category = "Аксессуары" if model_part.lower().startswith(("mic", "link", "flow")) else "Экшн-камеры"
-    return "Insta360", category, device_name, device_name.lower(), color
+    return "Insta360", category, device_name, device_name.lower(), color or "", extra
 
 
 def parse_airpods_max(title: str) -> tuple[str, str, str, str, str] | None:
@@ -2723,8 +2899,9 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
             reject_reason="noise_or_unrecognized",
         )
 
-    # User-directed: drop iMacs from the storefront entirely
-    if re.search(r"(?i)\bimac\b", f"{working} {section or ''}"):
+    # User-directed: drop iMacs from the storefront. Mac mini under the same
+    # Unisale section ("iMac \\ Mac mini") must still publish.
+    if re.search(r"(?i)\bimac\b", working) and not re.search(r"(?i)\bmac\s*mini\b", working):
         cleaned = clean_offer_title(working)
         return _rejected(
             model=cleaned[:80].lower() or "imac",
@@ -3085,12 +3262,13 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
         extra = cam_extra
     elif insta:
         kind = OfferKind.insta360
-        brand, device_category, device_name, model, insta_color = insta
+        brand, device_category, device_name, model, insta_color, insta_extra = insta
         if insta_color:
             color = insta_color
         storage = ""
         ram = ""
         sim = None
+        extra = insta_extra
     elif airpods_max:
         kind = OfferKind.apple_other
         brand, device_category, device_name, model, max_color = airpods_max

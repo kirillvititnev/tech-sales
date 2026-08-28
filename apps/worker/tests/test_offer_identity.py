@@ -282,6 +282,7 @@ def test_airpods_max_generations() -> None:
 
 def test_iphone_air_requires_iphone_word() -> None:
     assert classify_offer("Google Fitbit Air Obsidian").publish is False
+    assert classify_offer("Fitbit Air Berry", section="AirPods").publish is False
     assert classify_offer("Dreame Ultra Slim Magnetic Power Bank Air Power 17").publish is False
     # Insta360 Mic Air is a real mic — not an iPhone
     mic = classify_offer("Insta360 Mic Air")
@@ -299,6 +300,7 @@ def test_insta360_x5_and_variants() -> None:
         ("Insta360 Ace Pro 2", "Insta360 Ace Pro 2", "Экшн-камеры"),
         ("insta360 go 3s", "Insta360 GO 3S", "Экшн-камеры"),
         ("Insta360 Link 2", "Insta360 Link 2", "Аксессуары"),
+        ("Insta360 luna ultra (Standard Bundle) Black", "Insta360 Luna Ultra", "Экшн-камеры"),
     ]
     for title, name, category in cases:
         ident = classify_offer(title)
@@ -359,7 +361,7 @@ def test_asis_category_star_and_deep_blue() -> None:
         "Asis Active iPhone без коробки iPhone 17 Pro 512Gb Deep Blue 🇰🇷 (Asis)"
     )
     assert ident.publish is True
-    assert ident.device_category == "Asis*"
+    assert ident.device_category == "Смартфоны ASIS"
     assert ident.color == "Deep Blue"
     assert "Deep Blue" in ident.config
     assert ident.config.startswith("512GB")
@@ -369,7 +371,7 @@ def test_mist_blue_full_name() -> None:
     ident = classify_offer("iPhone 17 512Gb Mist Blue 🇭🇰 (Asis+)")
     assert ident.publish is True
     assert ident.color == "Mist Blue"
-    assert ident.device_category == "Asis+*"
+    assert ident.device_category == "Смартфоны ASIS+"
     assert ident.sim == "Sim+eSIM"
 
 
@@ -425,6 +427,42 @@ def test_se3_black_means_midnight() -> None:
     assert ident.device_name == "Apple Watch SE 3 44mm"
     assert ident.color == "Midnight"
     assert ident.band == "Sport Band (L/M)"
+
+
+def test_global_market_watch_year_size_and_fit() -> None:
+    se40 = classify_offer("SE3 2025 40mm Midnight M/L")
+    se44 = classify_offer("SE3 2025 44mm Midnight S/M")
+    assert se40.publish and se44.publish
+    assert se40.device_name == "Apple Watch SE 3 40mm"
+    assert se44.device_name == "Apple Watch SE 3 44mm"
+    assert se40.color == "Midnight"
+    assert se40.band == "M/L"
+    assert se44.band == "S/M"
+    assert se40.identity_key != se44.identity_key
+
+    trail_s = classify_offer("Ultra 3 Natural Ti Blue Trail Loop S/M")
+    trail_m = classify_offer("Ultra 3 Natural Ti Blue Trail Loop M/L")
+    alpine = classify_offer("Ultra 3 Natural Ti Blue Alpine Loop M")
+    assert trail_s.publish and trail_m.publish and alpine.publish
+    assert "Trail Loop" in trail_s.band
+    assert "S/M" in trail_s.band.replace(" ", "") or "S/M" in trail_s.band
+    assert trail_s.identity_key != trail_m.identity_key
+    assert "Alpine Loop" in alpine.band
+
+
+def test_global_market_ipad_and_neo_classify() -> None:
+    ipad = classify_offer("128GB Yellow", section="iPad 11 2025 Wi-Fi:")
+    assert ipad.publish is True
+    assert ipad.device_name == "iPad 11 Wi-Fi"
+    assert ipad.color == "Yellow"
+    assert ipad.storage == "128GB"
+
+    neo = classify_offer("8/256GB Citrus", section="MacBook Neo")
+    assert neo.publish is True
+    assert neo.device_name == "MacBook Neo"
+    assert neo.color == "Citrus"
+    assert neo.ram == "8GB"
+    assert neo.storage == "256GB"
 
 
 def test_ipad_color_not_in_device_name() -> None:
@@ -558,6 +596,19 @@ def test_dyson_airwrap_supersonic_vacuum() -> None:
     super_ = classify_offer("Supersonic HD16 Pink/Rose Gold")
     assert super_.publish and "HD16" in super_.device_name
     assert super_.color == "Pink/Rose Gold"
+    assert super_.device_category == "Фены"
+
+    hd_only = classify_offer("Dyson HD08 Nickel/Copper")
+    assert hd_only.publish is True
+    assert hd_only.device_category == "Фены"
+
+    ht = classify_offer("Dyson HT01 Airstrait Prussian Blue/Copper")
+    assert ht.publish is True
+    assert ht.device_category == "Выпрямители"
+
+    ht_only = classify_offer("HT01 Nickel/Copper")
+    assert ht_only.publish is True
+    assert ht_only.device_category == "Выпрямители"
 
     vac = classify_offer("V15 Detect Absolute SV47 Yellow/Nickel")
     assert vac.publish and vac.device_category == "Пылесосы"
@@ -712,6 +763,16 @@ def test_audio_jbl_marshall_beats_bose() -> None:
     assert buds.brand == "OnePlus"
     assert buds.color == "Lunar Radiance"
     assert "Galaxy" not in buds.device_name
+
+    buds4 = classify_offer("OnePlus Buds 4 Storm Gray 🇪🇺")
+    assert buds4.publish and buds4.kind == OfferKind.audio
+    assert buds4.device_name == "OnePlus Buds 4"
+    assert buds4.color == "Storm Gray"
+
+    zen = classify_offer("OnePlus Buds 4 Zen Green 🇪🇺")
+    assert zen.publish
+    assert zen.device_name == "OnePlus Buds 4"
+    assert zen.color == "Zen Green"
 
 
 def test_macbook_leading_order_code_unisale() -> None:
@@ -902,7 +963,119 @@ def test_macbook_novye_air13_clean() -> None:
     assert ident.model_code == "MDHC4"
 
 
+def test_macbook_neo_never_m_chip() -> None:
+    neo = classify_offer("MacBook Neo A18 MHFC4 – 8/512 Silver")
+    assert neo.publish is True
+    assert neo.device_name.startswith("MacBook Neo")
+    assert "M5" not in neo.device_name
+    assert "M4" not in neo.device_name
+
+    # Even if a supplier line wrongly mixes Neo + Mx, keep Neo line without M-chip
+    mixed = classify_offer("MacBook Neo M5 16/512 Silver")
+    assert mixed.publish is True
+    assert mixed.device_name == "MacBook Neo"
+    assert "M5" not in mixed.device_name
+
+
+def test_ipad_air_keeps_wifi_lte() -> None:
+    wifi = classify_offer("iPad Air 11 (M2) 2024 256GB Wi‑Fi Blue 🇭🇰")
+    assert wifi.publish is True
+    assert "Wi-Fi" in wifi.device_name
+    assert "M2" in wifi.device_name
+
+    lte = classify_offer("iPad Air 11 (M2) 2024 256GB Wi‑Fi + LTE Gray 🇺🇸")
+    assert lte.publish is True
+    assert "Wi-Fi" in lte.device_name and "LTE" in lte.device_name
+
+
 def test_cable_not_macbook() -> None:
     ident = classify_offer("Оригинальные кабеля lightning/ type-c")
     assert ident.publish is False
+
+
+def test_mac_mini_not_dropped_with_imac_section() -> None:
+    ident = classify_offer(
+        "MU9E3 Mac mini M4 Silver (16/512) 🇭🇰",
+        section="iMac \\ Mac mini (часть 2/2)",
+    )
+    assert ident.publish is True
+    assert "Mac mini" in ident.device_name
+    assert ident.reject_reason is None
+
+    imac = classify_offer("MWUU3 iMac M4 Silver (10/10/16/256) 🇷🇺")
+    assert imac.publish is False
+    assert imac.reject_reason == "imac_excluded"
+
+
+def test_unisale_missing_colors_and_android_brands() -> None:
+    lime = classify_offer("Galaxy a36 8/256GB Awesome Lime 🇦🇪")
+    assert lime.publish is True
+    assert lime.color == "Awesome Lime"
+
+    pixel = classify_offer("Pixel 7a 128GB Coral 🇦🇺")
+    assert pixel.publish is True
+    assert pixel.brand == "Google"
+    assert pixel.color == "Coral"
+
+    beo = classify_offer("Beoplay H95 (Chestnut)")
+    assert beo.publish is True
+    assert beo.color == "Chestnut"
+
+    bw = classify_offer("Bowers & Wilkins Px7 S2e (Anthracite)")
+    assert bw.publish is True
+    assert bw.color == "Anthracite"
+
+    ball = classify_offer("Big Ball Nickel/Copper 🇪🇺", section="Dyson (часть 2/2)")
+    assert ball.publish is True
+    assert "Big Ball" in ball.device_name
+
+    oppo = classify_offer("Oppo Reno 14 12/256GB Black 🇷🇺")
+    assert oppo.publish is True
+    assert oppo.brand == "Oppo"
+    assert oppo.device_name.startswith("Oppo")
+
+    luna = classify_offer("Insta360 luna ultra (Creator Bundle) White")
+    assert luna.publish is True
+    assert luna.brand == "Insta360"
+    assert luna.device_name == "Insta360 Luna Ultra"
+    assert luna.color == "Stellar White"
+    assert "Creator Bundle" in luna.config
+
+    charm = classify_offer("Digital Camera Charmera 1987 (+Kodak MicroSD)")
+    assert charm.publish is True
+    assert charm.brand == "Kodak"
+    assert charm.device_name == "Kodak Charmera 1987"
+    assert "Kodak MicroSD" in charm.config
+
+    gt = classify_offer("Realme gt 7 GT 12/256GB (5G) Glacier Blue 🇷🇺")
+    assert gt.publish is True
+    assert gt.device_name == "Realme GT 7"
+    assert gt.color == "Glacier Blue"
+
+    note = classify_offer("Realme note 60x Note 64/64GB Black 🇷🇺")
+    assert note.publish is True
+    assert note.device_name == "Realme Note 60x"
+
+    promax = classify_offer("Xiaomi 17 ProMax 12/512GB Black 🇨🇳")
+    assert promax.publish is True
+    assert promax.device_name == "Xiaomi 17 Pro Max"
+
+    phantom = classify_offer("Tecno 8 Phantom 8/256GB Gray 🇪🇺")
+    assert phantom.publish is True
+    assert phantom.device_name == "Tecno Phantom 8"
+
+    mate = classify_offer("Huawei Mate xt 16/1TB Red 🇷🇺")
+    assert mate.publish is True
+    assert mate.device_name == "Huawei Mate XT"
+
+    ally = classify_offer("Asus ROG Ally XBOX 512GB White", section="Игровые приставки (часть 2/2)")
+    assert ally.publish is True
+    assert ally.kind == OfferKind.gaming
+    assert ally.brand == "Asus"
+    assert ally.device_name == "Asus ROG Ally X"
+    assert ally.color == "White"
+
+    pura = classify_offer("Huawei Pura 90S Pro Max 12/256GB Blaze Purple 🇷🇺")
+    assert pura.publish is True
+    assert pura.color == "Blaze Purple"
 

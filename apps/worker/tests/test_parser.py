@@ -84,3 +84,69 @@ Saeco Magic M1 — 218900
     assert "Выдача" not in lines[0].title
     assert lines[1].title.startswith("S25 Ultra")
     assert "Прайс" not in lines[1].title
+
+
+def test_trailing_qty_suffix_still_parses() -> None:
+    lines = parse_price_text("17 Air 256GB Blue 🇦🇪 (E-Sim) - 71600 х1")
+    assert len(lines) == 1
+    assert "17 Air" in lines[0].title
+    assert lines[0].price == Decimal("71600")
+
+
+def test_global_market_ipad_and_macbook_neo_continuations() -> None:
+    text = """
+📲 iPad
+
+iPad 11 2025 Wi-Fi:
+
+128GB Yellow - 37000
+128GB Pink - 38500
+
+iPad Air 11 M4 Wi-Fi:
+
+128GB Gray - 61000
+
+MacBook
+
+Neo:
+
+8/256GB Citrus - 61500
+8/512GB Blush - 72000
+"""
+    lines = parse_price_text(text)
+    titles = [line.title for line in lines]
+    yellow = next(line for line in lines if "Yellow" in line.title)
+    assert "iPad 11" in yellow.title
+    assert "128GB" in yellow.title
+    assert yellow.price == Decimal("37000")
+    gray = next(line for line in lines if "Gray" in line.title)
+    assert "iPad Air 11" in gray.title
+    citrus = next(line for line in lines if "Citrus" in line.title)
+    assert "MacBook Neo" in citrus.title
+    assert "8/256GB" in citrus.title
+    assert any("Blush" in t and "MacBook Neo" in t for t in titles)
+
+
+def test_global_market_price_after_flag_without_dash() -> None:
+    lines = parse_price_text("17 Pro Max 1TB Blue🇭🇰 148000")
+    assert len(lines) == 1
+    assert lines[0].price == Decimal("148000")
+    assert "17 Pro Max" in lines[0].title
+    assert "🇭🇰" in lines[0].title
+
+
+def test_global_market_accessories_do_not_glue_onto_fitbit() -> None:
+    text = """
+🎧AirPods
+AirPods 4 ANC - 13200
+✨Accessories
+Fitbit Air Berry - 10300
+Pencil 2 - 5900
+"""
+    lines = parse_price_text(text)
+    air = next(line for line in lines if "AirPods 4" in line.title)
+    assert air.section and "AirPods" in air.section
+    fitbit = next(line for line in lines if "Fitbit" in line.title)
+    assert "AirPods" not in fitbit.title
+    pencil = next(line for line in lines if "Pencil" in line.title)
+    assert "AirPods" not in pencil.title

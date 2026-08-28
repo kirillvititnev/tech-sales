@@ -91,6 +91,8 @@ async def sync_folder(
     *,
     messages_per_channel: int = 100,
     category_slug: str = "apple",
+    channel_title: str | None = None,
+    telegram_id: str | None = None,
 ) -> dict[str, int]:
     worker_settings = get_worker_settings()
     markup = worker_settings.default_markup_percent
@@ -110,7 +112,18 @@ async def sync_folder(
     client = make_telegram_client()
     async with client:
         folder_channels = await get_folder_channels(client, folder_name)
-        logger.info("Folder '%s': %s channels", folder_name, len(folder_channels))
+        if telegram_id:
+            folder_channels = [fc for fc in folder_channels if str(fc.telegram_id) == str(telegram_id)]
+        elif channel_title:
+            needle = channel_title.casefold()
+            folder_channels = [fc for fc in folder_channels if needle in fc.title.casefold()]
+        logger.info(
+            "Folder '%s': %s channels (filter title=%r id=%r)",
+            folder_name,
+            len(folder_channels),
+            channel_title,
+            telegram_id,
+        )
 
         async with SessionLocal() as session:
             await ensure_schema(session)
@@ -138,6 +151,7 @@ async def sync_folder(
                 await session.flush()
 
             display_meta: dict[str, dict] = {}
+            synced_channel_ids: list = []
 
             for fc in folder_channels:
                 channel: SupplierChannel | None = None
@@ -150,6 +164,7 @@ async def sync_folder(
                         is_private=fc.is_private,
                         folder_label=folder_name,
                     )
+                    synced_channel_ids.append(channel.id)
                     stats["channels"] += 1
 
                     entity = await client.get_entity(
@@ -168,7 +183,7 @@ async def sync_folder(
                             if line.price < min_price:
                                 stats["rejected"] += 1
                                 continue
-                            identity = classify_offer(line.title, section=None)
+                            identity = classify_offer(line.title, section=line.section)
                             # title already has careful section glue from parser
                             if not identity.publish or not identity.identity_key:
                                 stats["rejected"] += 1
@@ -269,10 +284,14 @@ async def sync_folder(
                             await session.rollback()
 
             channel_ids = (
-                await session.execute(
-                    select(SupplierChannel.id).where(SupplierChannel.folder_label == folder_name)
-                )
-            ).scalars().all()
+                synced_channel_ids
+                if (telegram_id or channel_title) and synced_channel_ids
+                else (
+                    await session.execute(
+                        select(SupplierChannel.id).where(SupplierChannel.folder_label == folder_name)
+                    )
+                ).scalars().all()
+            )
 
             if not channel_ids:
                 logger.warning("No channels stored for folder %s", folder_name)
@@ -292,7 +311,11 @@ async def sync_folder(
             )
             by_key: dict[str, list[ProductOffer]] = defaultdict(list)
             for offer in offers:
-                identity = classify_offer(offer.raw_title)
+                section = (offer.raw_payload or {}).get("section")
+                identity = classify_offer(
+                    offer.raw_title,
+                    section=section if isinstance(section, str) else None,
+                )
                 if not identity.publish or not identity.identity_key:
                     continue
                 key = identity.identity_key
@@ -389,9 +412,9 @@ async def sync_folder(
                     "model_code": meta.get("model_code") or "",
                     "condition": (
                         "asis+"
-                        if str(meta.get("device_category") or "") == "Asis+*"
+                        if str(meta.get("device_category") or "").endswith("ASIS+")
                         else "asis"
-                        if str(meta.get("device_category") or "") == "Asis*"
+                        if str(meta.get("device_category") or "").endswith("ASIS")
                         else ""
                     ),
                     "region_samples": regions,
@@ -442,9 +465,11 @@ async def sync_folder(
                     Product.attributes.contains({"folder": folder_name}),
                 )
             )
-            for product in stale.scalars().all():
-                if product.id not in seen_product_ids:
-                    product.is_published = False
+            # Filtered single-channel sync must not unpublish the rest of the folder.
+            if not (telegram_id or channel_title):
+                for product in stale.scalars().all():
+                    if product.id not in seen_product_ids:
+                        product.is_published = False
 
             await session.commit()
 
