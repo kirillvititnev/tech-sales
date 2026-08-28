@@ -17,7 +17,7 @@
 make env
 make up          # postgres на :5433 (+ redis в docker, если образ скачан)
 make install     # venv + npm
-make api         # http://localhost:8000/docs  (создаёт таблицы)
+make api         # http://127.0.0.1:8000  (Swagger выключен; Alembic на старте)
 make seed        # демо-категории и товар
 make web         # http://localhost:3000
 make worker      # фоновый парсер (нужны TELEGRAM_API_ID/HASH)
@@ -30,12 +30,14 @@ Mini App (локально): http://localhost:3000/mini — тот же ката
 > Postgres в docker слушает **5433** (чтобы не конфликтовать с другими локальными БД).
 > Redis можно поднять через docker или `brew services start redis` / `redis-server`.
 
-Или всё через Docker:
+Или всё через Docker (образы без bind-mount исходников, Next `next start`):
 
 ```bash
 make env
 make up-all
 ```
+
+Для hot-reload в контейнерах: `make up-dev`.
 
 ## Telegram
 
@@ -72,7 +74,8 @@ docker compose --profile vpn up -d xray
 ### Админка
 
 http://localhost:3000/admin — заказы, каналы, каталог (HOT/публикация/ручные товары), лог цен, наценка.  
-Пока без логина (auth — следующий этап).
+Вход: HTTP Basic, логин/пароль из `ADMIN_USERNAME` / `ADMIN_PASSWORD` в `.env`.
+`make env` генерирует случайный пароль, если стоял шаблон.
 
 ## Структура
 

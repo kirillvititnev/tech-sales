@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.db import Base
+from apps.api.security import new_order_access_token
 
 
 class CustomerOrderStatus(str, enum.Enum):
@@ -52,6 +53,12 @@ class Order(Base):
     delivery_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    access_token: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True, default=new_order_access_token
+    )
+    privacy_consented_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

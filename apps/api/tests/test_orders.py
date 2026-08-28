@@ -1,4 +1,9 @@
+from uuid import uuid4
+
+from pydantic import ValidationError
+
 from apps.api.models.order import AdminOrderStatus, CustomerOrderStatus, DeliveryType
+from apps.api.schemas.order import OrderCreate
 from apps.api.services.orders import (
     apply_admin_status,
     cancel_order,
@@ -86,3 +91,31 @@ def test_cannot_skip_admin_status() -> None:
 def test_cancel_and_issue() -> None:
     assert cancel_order(CustomerOrderStatus.placed) == CustomerOrderStatus.cancelled
     assert mark_issued(CustomerOrderStatus.ready) == CustomerOrderStatus.issued
+
+
+def _order_payload(**overrides: object) -> dict:
+    data: dict = {
+        "customer_name": "Иван Иванов",
+        "customer_phone": "+79001112233",
+        "delivery_type": "pickup_moscow",
+        "privacy_consent": True,
+        "items": [{"product_id": str(uuid4()), "quantity": 1}],
+    }
+    data.update(overrides)
+    return data
+
+
+def test_order_requires_privacy_consent() -> None:
+    OrderCreate.model_validate(_order_payload())
+    try:
+        OrderCreate.model_validate(_order_payload(privacy_consent=False))
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+    payload = _order_payload()
+    del payload["privacy_consent"]
+    try:
+        OrderCreate.model_validate(payload)
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass

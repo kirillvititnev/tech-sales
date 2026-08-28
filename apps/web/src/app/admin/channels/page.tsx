@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { API_URL } from "@/lib/api";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Channel = {
   id: string;
@@ -28,7 +29,7 @@ export default function AdminChannelsPage() {
 
   async function load() {
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/channels`, { cache: "no-store" });
+      const res = await adminFetch(`${API_URL}/api/v1/admin/channels`);
       if (!res.ok) throw new Error("fail");
       setChannels(await res.json());
       setError(null);
@@ -44,9 +45,8 @@ export default function AdminChannelsPage() {
   async function setStatus(id: string, status: string) {
     setBusy(id);
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/channels/${id}/status`, {
+      const res = await adminFetch(`${API_URL}/api/v1/admin/channels/${id}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
       if (!res.ok) {

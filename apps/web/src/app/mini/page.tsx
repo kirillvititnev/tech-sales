@@ -1,11 +1,15 @@
-import { ProductGrid } from "@/components/ProductGrid";
+import { CatalogBrowser } from "@/components/CatalogBrowser";
 import { api } from "@/lib/api";
 
 export default async function MiniHomePage() {
   let products: Awaited<ReturnType<typeof api.products>> = [];
+  let facets: Awaited<ReturnType<typeof api.facets>> | null = null;
   let apiUp = true;
   try {
-    products = await api.products();
+    [products, facets] = await Promise.all([
+      api.products({ limit: 120, sort: "relevance" }),
+      api.facets(),
+    ]);
   } catch {
     apiUp = false;
   }
@@ -15,10 +19,16 @@ export default async function MiniHomePage() {
       <h2>Каталог</h2>
       <p className="lead">
         {apiUp
-          ? "White Shop Mini App — те же цены, заказ через менеджера."
+          ? "Поиск и фильтры. Заказ подтвердит менеджер."
           : "API недоступен. Запустите `make api`."}
       </p>
-      <ProductGrid products={products} hrefFor={(slug) => `/mini/product/${slug}`} />
+      {apiUp ? (
+        <CatalogBrowser
+          initialProducts={products}
+          initialFacets={facets}
+          productBasePath="/mini/product"
+        />
+      ) : null}
     </main>
   );
 }

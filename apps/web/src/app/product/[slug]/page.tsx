@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AddToCartButton } from "@/components/AddToCartButton";
 import { api, formatPrice } from "@/lib/api";
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -12,19 +13,25 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
     notFound();
   }
 
+  const attrs = product.attributes ?? {};
+  const category = typeof attrs.device_category === "string" ? attrs.device_category : "";
+  const name =
+    typeof attrs.device_name === "string" && attrs.device_name ? attrs.device_name : product.title;
+  const config = typeof attrs.config === "string" ? attrs.config : "";
+
   return (
     <main className="section">
-      <p className="product-brand">{product.brand ?? "Техника"}</p>
-      <h2>{product.title}</h2>
+      <p className="product-brand">{product.brand ?? "—"}</p>
+      {category ? <p className="product-category">{category}</p> : null}
+      <h2 style={{ marginTop: "0.35rem" }}>{name}</h2>
+      {config ? <p className="product-config" style={{ marginTop: "0.5rem" }}>{config}</p> : null}
       <p className="lead">{product.description ?? "Менеджер подтвердит заказ и оплату лично."}</p>
       <p style={{ fontSize: "1.8rem", margin: "0 0 1.5rem" }}>
         <strong>{formatPrice(product.price)}</strong>
       </p>
-      <div className="cta-row">
-        <Link href={`/checkout?product=${encodeURIComponent(product.slug)}`} className="btn btn-primary">
-          Заказать
-        </Link>
-        <Link href="/#catalog" className="btn btn-ghost" style={{ borderColor: "var(--line)", color: "var(--ink)" }}>
+      <AddToCartButton product={product} cartHref="/cart" />
+      <div className="cta-row" style={{ marginTop: "0.75rem" }}>
+        <Link href="/catalog" className="btn btn-ghost">
           К каталогу
         </Link>
       </div>

@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 
 import { API_URL } from "@/lib/api";
+import { adminFetch } from "@/lib/adminFetch";
 
 export default function AdminSettingsPage() {
-  const [markup, setMarkup] = useState("10");
+  const [markup, setMarkup] = useState("0");
   const [roundTo, setRoundTo] = useState("100");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -13,7 +14,7 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/v1/admin/settings`, { cache: "no-store" });
+        const res = await adminFetch(`${API_URL}/api/v1/admin/settings`);
         if (!res.ok) throw new Error("fail");
         const data = await res.json();
         setMarkup(String(data.default_markup_percent));
@@ -29,9 +30,8 @@ export default function AdminSettingsPage() {
     setMessage(null);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/settings`, {
+      const res = await adminFetch(`${API_URL}/api/v1/admin/settings`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           default_markup_percent: Number(markup),
           price_round_to: Number(roundTo),
@@ -54,7 +54,7 @@ export default function AdminSettingsPage() {
   return (
     <main className="section">
       <h2>Наценка</h2>
-      <p className="lead">Базовый фиксированный % и шаг округления витрины.</p>
+      <p className="lead">Базовый фиксированный % и шаг округления витрины. Уведомления о заказах уходят в Telegram, если в `.env` заданы `TELEGRAM_BOT_TOKEN` и `ADMIN_TELEGRAM_CHAT_ID`.</p>
       <form className="checkout-form" onSubmit={onSave}>
         <label>
           Наценка, %

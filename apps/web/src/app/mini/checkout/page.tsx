@@ -1,38 +1,47 @@
+"use client";
+
 import Link from "next/link";
-import { notFound } from "next/navigation";
 
-import { MiniCheckoutClient } from "@/components/MiniCheckoutClient";
-import { api } from "@/lib/api";
+import { CheckoutForm } from "@/components/CheckoutForm";
+import { useCart } from "@/lib/cart";
+import { useTelegramPrefill } from "@/lib/telegram";
 
-export default async function MiniCheckoutPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ product?: string }>;
-}) {
-  const { product: slug } = await searchParams;
-  if (!slug) {
+export default function MiniCheckoutPage() {
+  const { lines, ready } = useCart();
+  const { prefill } = useTelegramPrefill();
+
+  if (!ready) {
+    return (
+      <main className="section">
+        <h2>Оформление заказа</h2>
+        <p className="lead">Загрузка…</p>
+      </main>
+    );
+  }
+
+  if (!lines.length) {
     return (
       <main className="section">
         <h2>Оформление</h2>
-        <p className="lead">Выберите товар в каталоге.</p>
-        <Link href="/mini" className="btn btn-primary">
-          К каталогу
+        <p className="lead">Корзина пуста.</p>
+        <Link href="/mini/cart" className="btn btn-primary">
+          В корзину
         </Link>
       </main>
     );
   }
 
-  let product: Awaited<ReturnType<typeof api.product>>;
-  try {
-    product = await api.product(slug);
-  } catch {
-    notFound();
-  }
-
   return (
     <main className="section">
       <h2>Оформление заказа</h2>
-      <MiniCheckoutClient product={product} />
+      <CheckoutForm
+        items={lines}
+        defaults={prefill}
+        successHref={(number, access) =>
+          `/mini/order/${number}?access=${encodeURIComponent(access)}`
+        }
+        clearCartOnSuccess
+      />
     </main>
   );
 }

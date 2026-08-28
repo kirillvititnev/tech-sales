@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { API_URL, formatPrice } from "@/lib/api";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Offer = {
   id: string;
@@ -26,9 +27,7 @@ export default function AdminProductOffersPage() {
     if (!params?.id) return;
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/v1/admin/products/${params.id}/offers`, {
-          cache: "no-store",
-        });
+        const res = await adminFetch(`${API_URL}/api/v1/admin/products/${params.id}/offers`);
         if (!res.ok) throw new Error("fail");
         setOffers(await res.json());
       } catch {

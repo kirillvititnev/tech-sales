@@ -32,6 +32,16 @@ async def seed() -> None:
 
         admin = await db.execute(select(User).where(User.email == "admin@whiteshop.local"))
         if not admin.scalar_one_or_none():
+            from apps.api.config import get_settings
+
+            settings = get_settings()
+            password_hash = None
+            if settings.admin_password:
+                from passlib.context import CryptContext
+
+                password_hash = CryptContext(schemes=["bcrypt"], deprecated="auto").hash(
+                    settings.admin_password
+                )
             db.add(
                 User(
                     email="admin@whiteshop.local",
@@ -39,6 +49,7 @@ async def seed() -> None:
                     role=UserRole.admin,
                     referral_code=f"ADM{secrets.token_hex(3).upper()}",
                     bonus_balance=0,
+                    password_hash=password_hash,
                 )
             )
 

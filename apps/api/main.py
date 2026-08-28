@@ -1,39 +1,82 @@
 from contextlib import asynccontextmanager
+import asyncio
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from apps.api.config import get_settings
-from apps.api.db import Base, engine
+from apps.api.db import engine
+from apps.api.migrate import run_migrations
 from apps.api.routers import admin, catalog, health, orders
+from apps.api.security import assert_runtime_secrets, check_rate_limit
 
 # Ensure models are registered on metadata
 from apps.api import models as _models  # noqa: F401
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
+
+async def _run_schema_migrations() -> None:
+    await asyncio.to_thread(run_migrations)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Dev-friendly bootstrap; production should use Alembic migrations.
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    assert_runtime_secrets()
+    await _run_schema_migrations()
     yield
     await engine.dispose()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    docs = "/docs" if settings.api_docs_enabled else None
     app = FastAPI(
         title="White Shop API",
         version="0.1.0",
         lifespan=lifespan,
+        docs_url=docs,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
+    )
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.allowed_host_list,
     )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS", "HEAD"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
     )
+
+    @app.middleware("http")
+    async def security_and_limits(request: Request, call_next):
+        try:
+            check_rate_limit(request)
+        except HTTPException as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=dict(exc.headers or {}),
+            )
+        response = await call_next(request)
+        for key, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(key, value)
+        if request.url.path.startswith("/api/v1/admin") or request.url.path.startswith(
+            "/api/v1/orders"
+        ):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     app.include_router(health.router)
     app.include_router(catalog.router, prefix="/api/v1")
     app.include_router(orders.router, prefix="/api/v1")

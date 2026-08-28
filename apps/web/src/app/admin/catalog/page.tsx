@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { API_URL, formatPrice } from "@/lib/api";
+import { adminFetch } from "@/lib/adminFetch";
 
 type AdminProduct = {
   id: string;
@@ -29,7 +30,7 @@ export default function AdminCatalogPage() {
     const sp = new URLSearchParams();
     if (query) sp.set("q", query);
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/products?${sp}`, { cache: "no-store" });
+      const res = await adminFetch(`${API_URL}/api/v1/admin/products?${sp}`);
       if (!res.ok) throw new Error("fail");
       setProducts(await res.json());
       setError(null);
@@ -45,9 +46,8 @@ export default function AdminCatalogPage() {
   async function patch(id: string, body: Record<string, unknown>) {
     setBusy(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/products/${id}`, {
+      const res = await adminFetch(`${API_URL}/api/v1/admin/products/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!res.ok) {
@@ -68,9 +68,8 @@ export default function AdminCatalogPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/products`, {
+      const res = await adminFetch(`${API_URL}/api/v1/admin/products`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
           price: Number(price),

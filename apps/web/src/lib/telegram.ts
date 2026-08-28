@@ -12,6 +12,7 @@ import {
 type TelegramWebApp = {
   ready: () => void;
   expand: () => void;
+  initData?: string;
   initDataUnsafe?: { user?: TelegramWebAppUser };
   colorScheme?: "light" | "dark";
   themeParams?: Record<string, string>;
