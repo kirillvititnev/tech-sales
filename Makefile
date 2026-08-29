@@ -70,5 +70,5 @@ migrate:
 
 test:
 	PYTHONPATH=. .venv/bin/pytest apps/worker/tests apps/api/tests -q
-	node --experimental-strip-types --test apps/web/src/lib/telegramUser.test.ts apps/web/src/lib/apiBase.test.ts
+	node --experimental-strip-types --test apps/web/src/lib/telegramUser.test.ts apps/web/src/lib/apiBase.test.ts apps/web/src/lib/safeHref.test.ts
 	cd apps/web && npm run build

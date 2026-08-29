@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 
 import { AddToCartButton } from "@/components/AddToCartButton";
 import { formatPrice, type Product } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 export function formatDeviceCategory(category: string) {
   if (category === "Asis+*" || category === "Смартфоны ASIS+") return "Смартфоны ASIS+";
@@ -67,13 +68,16 @@ export function ProductGrid({
   productBasePath = "/product",
   emptyHref,
   emptyLabel = "К каталогу",
+  emptyText = "Пока нет товаров на витрине.",
 }: {
   products: Product[];
   productBasePath?: string;
   emptyHref?: string;
   emptyLabel?: string;
+  emptyText?: string;
 }) {
   const cartHref = productBasePath.startsWith("/mini") ? "/mini/cart" : "/cart";
+  const loginHref = productBasePath.startsWith("/mini") ? "/mini/account" : "/login";
   const [open, setOpen] = useState<Product | null>(null);
   const [closing, setClosing] = useState(false);
   const openerRef = useRef<HTMLButtonElement | null>(null);
@@ -91,7 +95,7 @@ export function ProductGrid({
   if (!products.length) {
     return (
       <div className="empty-state">
-        <p className="empty">Пока нет товаров на витрине.</p>
+        <p className="empty">{emptyText}</p>
         {emptyHref ? (
           <Link href={emptyHref} className="btn btn-primary">
             {emptyLabel}
@@ -138,6 +142,7 @@ export function ProductGrid({
         <ProductSheet
           product={open}
           cartHref={cartHref}
+          loginHref={loginHref}
           closing={closing}
           onClose={closeSheet}
           onExited={finishClose}
@@ -150,12 +155,14 @@ export function ProductGrid({
 function ProductSheet({
   product,
   cartHref,
+  loginHref,
   closing,
   onClose,
   onExited,
 }: {
   product: Product;
   cartHref: string;
+  loginHref: string;
   closing: boolean;
   onClose: () => void;
   onExited: () => void;
@@ -166,6 +173,7 @@ function ProductSheet({
   const dragStartY = useRef<number | null>(null);
   const [dragY, setDragY] = useState(0);
   const [entered, setEntered] = useState(false);
+  const { me, favoriteIds, toggleFavorite, recordView } = useAuth();
   const { brand, category, name, config } = catalogParts(product);
   const note =
     typeof product.description === "string" && product.description.trim()
@@ -186,6 +194,10 @@ function ProductSheet({
     const timer = window.setTimeout(() => setEntered(true), ms);
     return () => window.clearTimeout(timer);
   }, [product.id]);
+
+  useEffect(() => {
+    recordView(product.id);
+  }, [product.id, recordView]);
 
   useEffect(() => {
     const sheet = sheetRef.current;
@@ -295,6 +307,21 @@ function ProductSheet({
         <p className="product-sheet-price">
           <strong>{formatPrice(product.price)}</strong>
         </p>
+        {me ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              void toggleFavorite(product.id);
+            }}
+          >
+            {favoriteIds.has(product.id) ? "В избранном" : "В избранное"}
+          </button>
+        ) : (
+          <Link href={loginHref} className="btn btn-ghost">
+            В избранное — войдите
+          </Link>
+        )}
         <AddToCartButton key={product.id} product={product} cartHref={cartHref} />
       </div>
     </div>,

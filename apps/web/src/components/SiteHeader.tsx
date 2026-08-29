@@ -5,9 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { CartNavLink } from "@/components/CartNavLink";
+import { useAuth } from "@/lib/auth";
 
 export function SiteHeader() {
   const pathname = usePathname() ?? "/";
+  const { me, ready } = useAuth();
+  const accountCurrent =
+    pathname.startsWith("/account") || pathname.startsWith("/login") || pathname.startsWith("/register");
 
   return (
     <header className="site-header">
@@ -26,6 +30,15 @@ export function SiteHeader() {
           Каталог
         </Link>
         <CartNavLink href="/cart" />
+        {ready && me ? (
+          <Link href="/account" aria-current={accountCurrent ? "page" : undefined}>
+            Кабинет
+          </Link>
+        ) : (
+          <Link href="/login" aria-current={accountCurrent ? "page" : undefined}>
+            Войти
+          </Link>
+        )}
       </nav>
     </header>
   );

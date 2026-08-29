@@ -45,6 +45,7 @@ class ProductDetailOut(ProductOut):
 
 
 class ChannelCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=255)
     telegram_id: str = Field(min_length=1, max_length=128)
     username: str | None = Field(default=None, max_length=128)
@@ -66,6 +67,7 @@ class ChannelOut(BaseModel):
 
 
 class ChannelStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     status: str = Field(pattern="^(active|paused|error)$")
 
 
@@ -87,6 +89,7 @@ class AdminProductOut(BaseModel):
 
 
 class AdminProductPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     is_hot: bool | None = None
     is_published: bool | None = None
     title: str | None = None
@@ -94,6 +97,7 @@ class AdminProductPatch(BaseModel):
 
 
 class ManualProductCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=2, max_length=512)
     price: Decimal = Field(gt=0)
     brand: str | None = None
@@ -118,11 +122,18 @@ class OfferLogOut(BaseModel):
 class StoreSettingsOut(BaseModel):
     default_markup_percent: Decimal
     price_round_to: int
+    referral_percent_l1: Decimal
+    referral_percent_l2: Decimal
+    referral_percent_l3: Decimal
 
 
 class StoreSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     default_markup_percent: Decimal | None = Field(default=None, ge=0, le=100)
     price_round_to: int | None = Field(default=None, ge=1, le=10000)
+    referral_percent_l1: Decimal | None = Field(default=None, ge=0, le=50)
+    referral_percent_l2: Decimal | None = Field(default=None, ge=0, le=50)
+    referral_percent_l3: Decimal | None = Field(default=None, ge=0, le=50)
 
 
 class SuggestItemOut(BaseModel):

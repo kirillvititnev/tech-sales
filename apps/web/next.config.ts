@@ -43,6 +43,7 @@ const securityHeaders = [
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       "connect-src 'self' https://telegram.org https://*.telegram.org",
+      "frame-src 'self' https://oauth.telegram.org https://telegram.org https://*.telegram.org",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

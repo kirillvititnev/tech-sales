@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { useCart, type CartLine } from "@/lib/cart";
-import { API_URL, formatPrice } from "@/lib/api";
+import { formatPrice } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { CheckoutPrefill } from "@/lib/telegramUser";
 
 type DeliveryType = "pickup_moscow" | "cdek";
@@ -14,15 +15,18 @@ export function CheckoutForm({
   items,
   defaults,
   successHref,
+  loginHref = "/login?next=/checkout",
   clearCartOnSuccess = false,
 }: {
   items: CartLine[];
   defaults?: CheckoutPrefill;
   successHref?: (number: string, access: string) => string;
+  loginHref?: string;
   clearCartOnSuccess?: boolean;
 }) {
   const router = useRouter();
   const { clear } = useCart();
+  const { me, ready: authReady, authFetch } = useAuth();
   const [name, setName] = useState(defaults?.name ?? "");
   const [phone, setPhone] = useState("");
   const [telegram, setTelegram] = useState(defaults?.telegram ?? "");
@@ -34,9 +38,11 @@ export function CheckoutForm({
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
-    if (defaults?.name) setName(defaults.name);
+    if (me?.name) setName(me.name);
+    else if (defaults?.name) setName(defaults.name);
+    if (me?.phone) setPhone(me.phone);
     if (defaults?.telegram) setTelegram(defaults.telegram);
-  }, [defaults?.name, defaults?.telegram]);
+  }, [me?.name, me?.phone, defaults?.name, defaults?.telegram]);
 
   const needsAddress = delivery === "cdek";
   const totalLabel = useMemo(() => {
@@ -59,9 +65,8 @@ export function CheckoutForm({
     try {
       const initData =
         typeof window !== "undefined" ? window.Telegram?.WebApp?.initData ?? "" : "";
-      const res = await fetch(`${API_URL}/api/v1/orders`, {
+      const res = await authFetch("/api/v1/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customer_name: name,
           customer_phone: phone,
@@ -108,6 +113,11 @@ export function CheckoutForm({
         </ul>
         <p className="checkout-price">{totalLabel}</p>
         <p className="lead">Оплата через менеджера после подтверждения — онлайн-оплаты нет.</p>
+        {authReady && !me ? (
+          <p className="lead">
+            <Link href={loginHref}>Войдите</Link>, чтобы заказ появился в кабинете.
+          </p>
+        ) : null}
       </div>
 
       <label>
@@ -121,6 +131,7 @@ export function CheckoutForm({
           onChange={(e) => setPhone(e.target.value)}
           required
           autoComplete="tel"
+          inputMode="tel"
           placeholder="+7…"
         />
       </label>

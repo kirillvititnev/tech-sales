@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from apps.api.db import get_db
 from apps.api.models.catalog import ChannelStatus, Product, ProductOffer, SupplierChannel
-from apps.api.models.order import Order
+from apps.api.models.order import CustomerOrderStatus, Order
 from apps.api.schemas.catalog import (
     AdminProductOut,
     AdminProductPatch,
@@ -22,7 +22,8 @@ from apps.api.schemas.catalog import (
 )
 from apps.api.schemas.order import AdminOrderAction, AdminOrderOut, AdminOrderStatusUpdate
 from apps.api.services.admin_catalog import get_or_create_store_settings, slugify_manual
-from apps.api.services.orders import apply_admin_status, cancel_order, mark_issued
+from apps.api.services.orders import apply_admin_status, cancel_order, customer_status_notice, mark_issued
+from apps.api.services.referrals import credit_paid_order
 
 from apps.api.security import require_admin
 
@@ -33,14 +34,21 @@ def _orders_query():
     return select(Order).options(selectinload(Order.items))
 
 
+def _settings_out(row) -> StoreSettingsOut:
+    return StoreSettingsOut(
+        default_markup_percent=row.default_markup_percent,
+        price_round_to=row.price_round_to,
+        referral_percent_l1=row.referral_percent_l1,
+        referral_percent_l2=row.referral_percent_l2,
+        referral_percent_l3=row.referral_percent_l3,
+    )
+
+
 @router.get("/settings", response_model=StoreSettingsOut)
 async def get_settings(db: AsyncSession = Depends(get_db)) -> StoreSettingsOut:
     row = await get_or_create_store_settings(db)
     await db.commit()
-    return StoreSettingsOut(
-        default_markup_percent=row.default_markup_percent,
-        price_round_to=row.price_round_to,
-    )
+    return _settings_out(row)
 
 
 @router.patch("/settings", response_model=StoreSettingsOut)
@@ -52,12 +60,15 @@ async def patch_settings(
         row.default_markup_percent = payload.default_markup_percent
     if payload.price_round_to is not None:
         row.price_round_to = payload.price_round_to
+    if payload.referral_percent_l1 is not None:
+        row.referral_percent_l1 = payload.referral_percent_l1
+    if payload.referral_percent_l2 is not None:
+        row.referral_percent_l2 = payload.referral_percent_l2
+    if payload.referral_percent_l3 is not None:
+        row.referral_percent_l3 = payload.referral_percent_l3
     await db.commit()
     await db.refresh(row)
-    return StoreSettingsOut(
-        default_markup_percent=row.default_markup_percent,
-        price_round_to=row.price_round_to,
-    )
+    return _settings_out(row)
 
 
 @router.get("/channels", response_model=list[ChannelOut])
@@ -224,6 +235,7 @@ async def update_admin_status(
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
 
+    previous = order.customer_status
     try:
         admin_status, customer_status = apply_admin_status(
             delivery_type=order.delivery_type,
@@ -236,6 +248,17 @@ async def update_admin_status(
 
     order.admin_status = admin_status
     order.customer_status = customer_status
+    if customer_status == CustomerOrderStatus.paid and previous != CustomerOrderStatus.paid:
+        settings_row = await get_or_create_store_settings(db)
+        await credit_paid_order(db, order, settings_row)
+    notice = customer_status_notice(
+        user_id=order.user_id,
+        number=order.number,
+        previous=previous,
+        new_status=customer_status,
+    )
+    if notice:
+        db.add(notice)
     await db.commit()
 
     loaded = await db.execute(_orders_query().where(Order.id == order.id))
@@ -253,6 +276,7 @@ async def order_action(
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
 
+    previous = order.customer_status
     try:
         if payload.action == "cancel":
             order.customer_status = cancel_order(order.customer_status)
@@ -263,6 +287,14 @@ async def order_action(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    notice = customer_status_notice(
+        user_id=order.user_id,
+        number=order.number,
+        previous=previous,
+        new_status=order.customer_status,
+    )
+    if notice:
+        db.add(notice)
     await db.commit()
     loaded = await db.execute(_orders_query().where(Order.id == order.id))
     return loaded.scalar_one()

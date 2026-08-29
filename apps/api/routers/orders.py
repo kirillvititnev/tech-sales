@@ -11,8 +11,10 @@ from sqlalchemy.orm import selectinload
 
 from apps.api.config import get_settings
 from apps.api.db import get_db
+from apps.api.deps import get_optional_user
 from apps.api.models.catalog import Product
 from apps.api.models.order import AdminOrderStatus, CustomerOrderStatus, DeliveryType, Order, OrderItem
+from apps.api.models.user import User
 from apps.api.schemas.order import OrderCreate, OrderOut
 from apps.api.security import new_order_access_token, verify_telegram_init_data
 from apps.api.services.order_notify import build_admin_order_message, deliver_admin_order_text
@@ -64,6 +66,7 @@ async def create_order(
     payload: OrderCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ) -> OrderOut:
     contact_err = validate_contacts(payload.customer_name, payload.customer_phone)
     if contact_err:
@@ -109,6 +112,7 @@ async def create_order(
 
     order = Order(
         number=_order_number(),
+        user_id=user.id if user else None,
         customer_name=payload.customer_name.strip(),
         customer_phone=payload.customer_phone.strip(),
         customer_telegram=telegram,

@@ -1,0 +1,34 @@
+---
+description: Further work only via installed skills; UI via Apple HIG; defensive security only
+alwaysApply: true
+---
+
+# Skills-first
+
+All further work in this repo follows installed skills. Do not improvise auth, PII, or storefront UI against them.
+
+## UI — Apple HIG
+
+Follow `.cursor/rules/apple-design.mdc`. For reviews, load HIG references (accessibility, color, layout, typography; forms → entering-data). Translate Apple terms to this stack (Next.js / CSS).
+
+- Touch targets ≥ 44px; contrast ≥ 4.5:1 for body text; light and dark
+- Mini App: bottom tab bar, safe areas, sheets — catalog cards must not navigate to `/product/[slug]`
+- Grouped lists for cabinet/settings; sentence case; confirm destructive actions
+- Errors next to the field (`aria-invalid`, `role="alert"`); never prefill passwords
+
+## Security — defensive skills only
+
+Before changing auth, tokens, PII, rate limits, headers, or object access, read the matching `implementing-*` skill under `.cursor/rules/.agents/skills/`. Treat `testing-*` skills as **hardening checklists**, never as attack procedures.
+
+**Never** follow `exploiting-*`, `abusing-*`, or write exploit PoCs, payloads, or attack steps — including for localhost, labs, or “authorized” tests.
+
+Apply on this product:
+
+- JWT HS256 with an explicit `algorithms` allowlist; `iss`/`aud`/`exp`/`nbf`/`iat`/`sub`; short access + rotating refresh; logout revokes
+- Pydantic `extra="forbid"` on write DTOs; no `role` / `bonus_balance` / `is_active` from clients
+- `/me/*` scoped to `require_user`; invalid `Authorization` is 401, not a guest
+- Auth rate limits + `Retry-After`; generic login errors; dummy hash if the user is missing
+- 152-ФЗ / GDPR skill analog: consent timestamp, export, erasure, minimization
+- Security headers (CSP, HSTS, `X-Frame-Options`, `Cache-Control: no-store` on auth/me)
+
+Do not commit `.cursor/rules/.agents/`, `skills-lock.json`, `.env`, or tunnel credentials.

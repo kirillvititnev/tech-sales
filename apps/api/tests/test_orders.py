@@ -7,6 +7,7 @@ from apps.api.schemas.order import OrderCreate
 from apps.api.services.orders import (
     apply_admin_status,
     cancel_order,
+    customer_status_notice,
     mark_issued,
     validate_contacts,
     validate_delivery,
@@ -91,6 +92,26 @@ def test_cannot_skip_admin_status() -> None:
 def test_cancel_and_issue() -> None:
     assert cancel_order(CustomerOrderStatus.placed) == CustomerOrderStatus.cancelled
     assert mark_issued(CustomerOrderStatus.ready) == CustomerOrderStatus.issued
+
+
+def test_customer_status_notice_skips_guest_and_noop() -> None:
+    assert (
+        customer_status_notice(
+            user_id=None,
+            number="WS-1",
+            previous=CustomerOrderStatus.placed,
+            new_status=CustomerOrderStatus.paid,
+        )
+        is None
+    )
+    notice = customer_status_notice(
+        user_id=uuid4(),
+        number="WS-1",
+        previous=CustomerOrderStatus.placed,
+        new_status=CustomerOrderStatus.paid,
+    )
+    assert notice is not None
+    assert "Оплачен" in notice.body
 
 
 def _order_payload(**overrides: object) -> dict:

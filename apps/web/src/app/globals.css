@@ -877,11 +877,16 @@ a.btn,
 
 .consent label.consent {
   flex: 1 1 16rem;
+  min-height: 44px;
+  align-items: center;
 }
 
 .consent input[type="checkbox"] {
-  width: auto;
-  margin-top: 0.3rem;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  margin-top: 0;
 }
 
 .consent a {
@@ -985,7 +990,7 @@ a.btn,
   bottom: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   min-height: calc(49px + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--paper) 90%, transparent);
@@ -1000,7 +1005,7 @@ a.btn,
   gap: 0.35rem;
   min-height: 49px;
   color: var(--mute);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 560;
   transition:
     color var(--duration-ui) var(--ease-out),
@@ -1254,6 +1259,123 @@ a.btn,
     opacity: 0;
     transform: scale(0.96) translateY(12px);
   }
+}
+
+.telegram-login-slot {
+  min-height: 44px;
+}
+
+.account-groups {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 40rem;
+}
+
+.account-group {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.account-group h3,
+.account-section h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.account-section {
+  margin-top: 2rem;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 44px;
+}
+
+.account-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.account-meta,
+.account-note {
+  display: block;
+  color: var(--mute);
+  font-size: 0.9rem;
+}
+
+.account-note-btn {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.65rem 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-note-btn.is-unread strong {
+  font-weight: 700;
+}
+
+.account-danger {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-danger label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--mute);
+}
+
+.account-danger input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem;
+  max-width: 34rem;
+  padding: 0.2rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+
+.segmented button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.segmented button.is-active {
+  background: var(--surface);
+  font-weight: 510;
 }
 
 @media (prefers-reduced-motion: reduce) {

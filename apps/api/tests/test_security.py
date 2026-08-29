@@ -64,11 +64,16 @@ def test_telegram_init_data_hmac() -> None:
     assert parsed["query_id"] == "AA"
     assert verify_telegram_init_data(init_data, "wrong") is None
     assert verify_telegram_init_data("hash=dead", token) is None
+    assert verify_telegram_init_data(init_data, token, max_age_sec=1) is None
 
 
 def test_rate_limit_rules() -> None:
     assert rate_limit_rule("GET", "/health") is None
     assert rate_limit_rule("POST", "/api/v1/orders")[0] == "orders"
+    assert rate_limit_rule("POST", "/api/v1/auth/login")[0] == "auth-login"
+    assert rate_limit_rule("POST", "/api/v1/auth/register")[0] == "auth-register"
+    assert rate_limit_rule("POST", "/api/v1/auth/login")[1] == 5
+    assert rate_limit_rule("POST", "/api/v1/auth/refresh")[0] == "auth-refresh"
     assert rate_limit_rule("GET", "/api/v1/orders/by-number/WS-1")[0] == "order-lookup"
     assert rate_limit_rule("GET", "/api/v1/admin/orders")[0] == "admin"
 

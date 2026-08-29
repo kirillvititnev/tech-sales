@@ -9,6 +9,7 @@ const TABS = [
   { href: "/mini", label: "Каталог", match: (path: string) => path === "/mini" || path.startsWith("/mini/product") },
   { href: "/mini/hot", label: "HOT", match: (path: string) => path.startsWith("/mini/hot") },
   { href: "/mini/cart", label: "Корзина", match: (path: string) => path.startsWith("/mini/cart") || path.startsWith("/mini/checkout") || path.startsWith("/mini/order") },
+  { href: "/mini/account", label: "Кабинет", match: (path: string) => path.startsWith("/mini/account") || path.startsWith("/mini/login") || path.startsWith("/mini/register") },
 ];
 
 export function MiniTabBar() {

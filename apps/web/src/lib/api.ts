@@ -154,6 +154,18 @@ async function apiGetLive<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export function apiErrorMessage(data: unknown, fallback: string): string {
+  if (typeof data === "object" && data !== null && "detail" in data) {
+    const detail = (data as { detail: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail) && detail[0] && typeof detail[0] === "object" && detail[0] !== null) {
+      const first = detail[0] as { msg?: unknown };
+      if (typeof first.msg === "string" && first.msg.trim()) return first.msg;
+    }
+  }
+  return fallback;
+}
+
 export function formatPrice(price: string | null): string {
   if (!price) return "—";
   const n = Number(price);

@@ -46,6 +46,15 @@ function loadScript(): Promise<void> {
   });
 }
 
+export async function ensureTelegramWebApp(): Promise<TelegramWebApp | undefined> {
+  try {
+    await loadScript();
+  } catch {
+    return undefined;
+  }
+  return window.Telegram?.WebApp;
+}
+
 export function useTelegramPrefill(): { prefill: CheckoutPrefill; inTelegram: boolean; ready: boolean } {
   const [prefill, setPrefill] = useState<CheckoutPrefill>({});
   const [inTelegram, setInTelegram] = useState(false);

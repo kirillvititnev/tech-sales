@@ -8,6 +8,7 @@ import os
 import secrets
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from threading import Lock
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlparse
@@ -58,7 +59,7 @@ def runtime_secret_problems() -> list[str]:
         problems.append("DATABASE_URL uses a known-default Postgres password")
     if is_weak_secret(_password_from_url(settings.redis_url)):
         problems.append("REDIS_URL has no password or a known default")
-    if is_weak_secret(settings.api_secret_key):
+    if is_weak_secret(settings.api_secret_key, min_len=32):
         problems.append("API_SECRET_KEY is missing or a known default")
     return problems
 
@@ -133,7 +134,23 @@ async def require_admin(
     return credentials.username
 
 
-def verify_telegram_init_data(init_data: str, bot_token: str) -> dict[str, str] | None:
+def _auth_date_fresh(pairs: dict[str, str], *, max_age_sec: int | None) -> bool:
+    if max_age_sec is None:
+        return True
+    raw = pairs.get("auth_date")
+    try:
+        ts = int(raw or "")
+    except ValueError:
+        return False
+    return abs(time.time() - ts) <= max_age_sec
+
+
+def verify_telegram_init_data(
+    init_data: str,
+    bot_token: str,
+    *,
+    max_age_sec: int | None = None,
+) -> dict[str, str] | None:
     """Validate Mini App initData HMAC. Returns parsed fields or None."""
     if not init_data or not bot_token:
         return None
@@ -146,7 +163,32 @@ def verify_telegram_init_data(init_data: str, bot_token: str) -> dict[str, str] 
     digest = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(digest, received):
         return None
+    if not _auth_date_fresh(pairs, max_age_sec=max_age_sec):
+        return None
     return pairs
+
+
+def verify_telegram_login_widget(
+    fields: dict[str, str],
+    bot_token: str,
+    *,
+    max_age_sec: int = 86400,
+) -> dict[str, str] | None:
+    """Validate Telegram Login Widget payload (HMAC-SHA256 of bot token SHA256)."""
+    if not bot_token:
+        return None
+    received = fields.get("hash", "")
+    if not received:
+        return None
+    check = {k: str(v) for k, v in fields.items() if k != "hash" and v is not None}
+    data_check = "\n".join(f"{k}={v}" for k, v in sorted(check.items()))
+    secret = hashlib.sha256(bot_token.encode()).digest()
+    digest = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(digest, received):
+        return None
+    if not _auth_date_fresh(check, max_age_sec=max_age_sec):
+        return None
+    return check
 
 
 class SlidingWindowLimiter:
@@ -154,16 +196,42 @@ class SlidingWindowLimiter:
         self._hits: dict[str, list[float]] = defaultdict(list)
         self._lock = Lock()
 
-    def allow(self, key: str, limit: int, window_sec: float) -> bool:
+    def check(self, key: str, limit: int, window_sec: float) -> "RateDecision":
         now = time.monotonic()
         with self._lock:
             bucket = self._hits[key]
             cutoff = now - window_sec
             bucket[:] = [t for t in bucket if t >= cutoff]
+            retry_after = 0
             if len(bucket) >= limit:
-                return False
-            bucket.append(now)
-            return True
+                oldest = bucket[0] if bucket else now
+                retry_after = max(1, int(oldest + window_sec - now) + 1)
+                remaining = 0
+                allowed = False
+            else:
+                bucket.append(now)
+                remaining = max(0, limit - len(bucket))
+                allowed = True
+            reset_epoch = int(time.time() + window_sec)
+            return RateDecision(
+                allowed=allowed,
+                limit=limit,
+                remaining=remaining,
+                retry_after=retry_after,
+                reset_epoch=reset_epoch,
+            )
+
+    def allow(self, key: str, limit: int, window_sec: float) -> bool:
+        return self.check(key, limit, window_sec).allowed
+
+
+@dataclass(frozen=True)
+class RateDecision:
+    allowed: bool
+    limit: int
+    remaining: int
+    retry_after: int
+    reset_epoch: int
 
 
 limiter = SlidingWindowLimiter()
@@ -188,25 +256,57 @@ def rate_limit_rule(method: str, path: str) -> tuple[str, int, float] | None:
         return None
     if method == "POST" and path.rstrip("/") == "/api/v1/orders":
         return ("orders", 8, 60.0)
+    if method == "POST" and path.rstrip("/") == "/api/v1/auth/login":
+        return ("auth-login", 5, 60.0)
+    if method == "POST" and path.rstrip("/") == "/api/v1/auth/register":
+        return ("auth-register", 3, 300.0)
+    if method == "POST" and path.rstrip("/") in {
+        "/api/v1/auth/telegram",
+        "/api/v1/auth/telegram-login",
+    }:
+        return ("auth-telegram", 8, 60.0)
+    if method == "POST" and path.rstrip("/") == "/api/v1/auth/refresh":
+        return ("auth-refresh", 30, 60.0)
+    if method == "POST" and path.startswith("/api/v1/auth/"):
+        return ("auth", 12, 60.0)
     if method == "GET" and "/api/v1/orders/by-number/" in path:
         return ("order-lookup", 20, 60.0)
+    if method == "GET" and path.rstrip("/") == "/api/v1/me/export":
+        return ("me-export", 6, 60.0)
+    if method == "POST" and path.rstrip("/") == "/api/v1/me/delete":
+        return ("me-delete", 3, 300.0)
     if path.startswith("/api/v1/admin"):
         return ("admin", 60, 60.0)
     return ("global", 240, 60.0)
 
 
-def check_rate_limit(request: Request) -> None:
+def rate_limit_headers(decision: RateDecision) -> dict[str, str]:
+    headers = {
+        "X-RateLimit-Limit": str(decision.limit),
+        "X-RateLimit-Remaining": str(decision.remaining),
+        "X-RateLimit-Reset": str(decision.reset_epoch),
+    }
+    if not decision.allowed:
+        headers["Retry-After"] = str(decision.retry_after or 60)
+    return headers
+
+
+def check_rate_limit(request: Request) -> dict[str, str]:
     rule = rate_limit_rule(request.method, request.url.path)
     if rule is None:
-        return
+        return {}
     suffix, limit, window = rule
     key = f"{client_ip(request)}:{suffix}"
-    if not limiter.allow(key, limit, window):
+    decision = limiter.check(key, limit, window)
+    headers = rate_limit_headers(decision)
+    request.state.rate_limit_headers = headers
+    if not decision.allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Слишком много запросов, повторите позже",
-            headers={"Retry-After": "60"},
+            headers=headers,
         )
+    return headers
 
 
 def new_order_access_token() -> str:

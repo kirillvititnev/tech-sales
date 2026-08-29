@@ -40,6 +40,7 @@ export default function MiniCheckoutPage() {
         successHref={(number, access) =>
           `/mini/order/${number}?access=${encodeURIComponent(access)}`
         }
+        loginHref="/mini/account"
         clearCartOnSuccess
       />
     </main>

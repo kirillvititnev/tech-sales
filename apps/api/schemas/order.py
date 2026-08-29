@@ -7,11 +7,14 @@ from apps.api.models.order import AdminOrderStatus, DeliveryType
 
 
 class OrderItemIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     product_id: UUID
     quantity: int = Field(ge=1, le=100, default=1)
 
 
 class OrderCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     customer_name: str = Field(min_length=2, max_length=255)
     customer_phone: str = Field(min_length=10, max_length=32)
     customer_telegram: str | None = Field(default=None, max_length=128)
@@ -77,10 +80,14 @@ class AdminOrderOut(BaseModel):
 
 
 class AdminOrderStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     admin_status: AdminOrderStatus
 
 
 class AdminOrderAction(BaseModel):
     """issue | cancel"""
+
+    model_config = ConfigDict(extra="forbid")
 
     action: str = Field(pattern="^(issue|cancel)$")
