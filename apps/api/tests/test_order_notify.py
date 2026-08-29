@@ -82,6 +82,31 @@ def test_admin_message_has_contacts_lines_and_cheapest_mark() -> None:
     assert "199 800 ₽" in text
 
 
+def test_admin_message_shows_bonus_spend() -> None:
+    product_id = uuid4()
+    item = OrderItem(
+        product_id=product_id,
+        title="iPhone",
+        unit_price=Decimal("10000"),
+        quantity=1,
+    )
+    order = Order(
+        number="WS-BNS",
+        customer_name="Анна",
+        customer_phone="79001112233",
+        customer_status=CustomerOrderStatus.placed,
+        admin_status=AdminOrderStatus.accepted,
+        delivery_type=DeliveryType.pickup_moscow,
+        total_amount=Decimal("7000"),
+        bonus_spent=Decimal("3000"),
+        items=[item],
+    )
+    text = format_admin_order_message(order, {})
+    assert "Итого витрина: 10 000 ₽" in text
+    assert "Бонусы: −3 000 ₽" in text
+    assert "К оплате: 7 000 ₽" in text
+
+
 def test_no_offers_line() -> None:
     product_id = uuid4()
     item = OrderItem(product_id=product_id, title="Ручной товар", unit_price=Decimal("10000"), quantity=1)

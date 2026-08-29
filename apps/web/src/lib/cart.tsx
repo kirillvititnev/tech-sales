@@ -6,24 +6,27 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 
-export type CartLine = {
-  productId: string;
-  slug: string;
-  title: string;
-  brand: string | null;
-  price: string;
-  quantity: number;
-};
+import { api, type Product } from "@/lib/api";
+import {
+  livePriceNote,
+  mergeLiveCart,
+  type CartLine,
+} from "@/lib/cartPrices";
+
+export type { CartLine };
 
 type CartContextValue = {
   lines: CartLine[];
   count: number;
   total: number;
   ready: boolean;
+  pricesSyncing: boolean;
+  priceNote: string | null;
   add: (line: Omit<CartLine, "quantity">, qty?: number) => void;
   setQty: (productId: string, quantity: number) => void;
   remove: (productId: string) => void;
@@ -31,6 +34,7 @@ type CartContextValue = {
 };
 
 const STORAGE_KEY = "whiteshop.cart.v1";
+const LIVE_CHUNK = 50;
 const CartContext = createContext<CartContextValue | null>(null);
 
 function loadCart(): CartLine[] {
@@ -50,9 +54,23 @@ function saveCart(lines: CartLine[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(lines));
 }
 
+async function fetchLiveProducts(ids: string[]): Promise<Product[]> {
+  const out: Product[] = [];
+  for (let i = 0; i < ids.length; i += LIVE_CHUNK) {
+    const chunk = ids.slice(i, i + LIVE_CHUNK);
+    const live = await api.productsLive({ ids: chunk });
+    out.push(...live);
+  }
+  return out;
+}
+
 export function CartProvider({ children }: { children: ReactNode }) {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [ready, setReady] = useState(false);
+  const [pricesSyncing, setPricesSyncing] = useState(false);
+  const [priceNote, setPriceNote] = useState<string | null>(null);
+  const linesRef = useRef<CartLine[]>([]);
+  linesRef.current = lines;
 
   useEffect(() => {
     setLines(loadCart());
@@ -63,6 +81,45 @@ export function CartProvider({ children }: { children: ReactNode }) {
     if (!ready) return;
     saveCart(lines);
   }, [lines, ready]);
+
+  const idsKey = useMemo(
+    () =>
+      [...lines.map((line) => line.productId)]
+        .sort()
+        .join(","),
+    [lines],
+  );
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!idsKey) {
+      setPriceNote(null);
+      setPricesSyncing(false);
+      return;
+    }
+    const ids = idsKey.split(",");
+    let cancelled = false;
+    setPricesSyncing(true);
+    void (async () => {
+      try {
+        const live = await fetchLiveProducts(ids);
+        if (cancelled) return;
+        const result = mergeLiveCart(linesRef.current, live, ids);
+        linesRef.current = result.next;
+        setLines(result.next);
+        setPriceNote(livePriceNote(result.removed, result.changed));
+      } catch {
+        if (!cancelled) {
+          setPriceNote("Не удалось сверить цены с витриной. Проверьте сеть перед заказом.");
+        }
+      } finally {
+        if (!cancelled) setPricesSyncing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, idsKey]);
 
   const add = useCallback((line: Omit<CartLine, "quantity">, qty = 1) => {
     setLines((prev) => {
@@ -100,8 +157,19 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ lines, count, total, ready, add, setQty, remove, clear }),
-    [lines, count, total, ready, add, setQty, remove, clear],
+    () => ({
+      lines,
+      count,
+      total,
+      ready,
+      pricesSyncing,
+      priceNote,
+      add,
+      setQty,
+      remove,
+      clear,
+    }),
+    [lines, count, total, ready, pricesSyncing, priceNote, add, setQty, remove, clear],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

@@ -53,6 +53,9 @@ class Order(Base):
     delivery_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    bonus_spent: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
     access_token: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False, index=True, default=new_order_access_token
     )

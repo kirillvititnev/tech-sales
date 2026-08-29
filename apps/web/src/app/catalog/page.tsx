@@ -20,7 +20,7 @@ export default async function CatalogPage() {
       <h2>Каталог</h2>
       <p className="lead">
         {apiUp
-          ? "Поиск, категории и фильтры. Цены — без наценки."
+          ? "Поиск, категории и фильтры. Цены уже с наценкой магазина."
           : "API пока недоступен — запустите `make up` и `make api`."}
       </p>
       {apiUp ? (

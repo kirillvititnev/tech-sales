@@ -17,8 +17,10 @@ from apps.api.models.order import AdminOrderStatus, CustomerOrderStatus, Deliver
 from apps.api.models.user import User
 from apps.api.schemas.order import OrderCreate, OrderOut
 from apps.api.security import new_order_access_token, verify_telegram_init_data
+from apps.api.services.bonuses import apply_checkout_spend, resolve_bonus_spend
 from apps.api.services.order_notify import build_admin_order_message, deliver_admin_order_text
 from apps.api.services.orders import validate_contacts, validate_delivery
+from apps.api.services.referrals import round_money
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 logger = logging.getLogger(__name__)
@@ -106,6 +108,26 @@ async def create_order(
             )
         )
 
+    spend = Decimal("0")
+    requested = payload.bonus_spend
+    if requested is not None and requested > 0:
+        if user is None:
+            raise HTTPException(status_code=400, detail="Войдите, чтобы списать бонусы")
+        locked = (
+            await db.execute(select(User).where(User.id == user.id).with_for_update())
+        ).scalar_one()
+        try:
+            spend = resolve_bonus_spend(
+                requested,
+                balance=Decimal(str(locked.bonus_balance or 0)),
+                goods_total=total,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        user = locked
+
+    payable = round_money(total - spend)
+
     address = (payload.delivery_address or "").strip() or None
     if payload.delivery_type == DeliveryType.pickup_moscow:
         address = address or "Самовывоз, Москва"
@@ -121,12 +143,19 @@ async def create_order(
         delivery_type=payload.delivery_type,
         delivery_address=address,
         comment=(payload.comment or "").strip() or None,
-        total_amount=total,
+        total_amount=payable,
+        bonus_spent=spend,
         access_token=new_order_access_token(),
         privacy_consented_at=datetime.now(timezone.utc),
         items=items,
     )
     db.add(order)
+    await db.flush()
+    if spend > 0 and user is not None:
+        try:
+            await apply_checkout_spend(db, user, order, spend)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
 
     loaded = await db.execute(_load_order_query().where(Order.id == order.id))

@@ -23,6 +23,7 @@ class OrderCreate(BaseModel):
     comment: str | None = Field(default=None, max_length=2000)
     telegram_init_data: str | None = Field(default=None, max_length=4096)
     privacy_consent: bool
+    bonus_spend: Decimal | None = Field(default=None, ge=0, le=1_000_000)
     items: list[OrderItemIn] = Field(min_length=1, max_length=50)
 
     @field_validator("privacy_consent")
@@ -58,6 +59,7 @@ class OrderOut(BaseModel):
     delivery_address: str | None = None
     comment: str | None = None
     total_amount: Decimal
+    bonus_spent: Decimal = Decimal("0")
     items: list[OrderItemOut] = []
     access_token: str | None = None
 
@@ -76,6 +78,7 @@ class AdminOrderOut(BaseModel):
     delivery_address: str | None = None
     comment: str | None = None
     total_amount: Decimal
+    bonus_spent: Decimal = Decimal("0")
     items: list[OrderItemOut] = []
 
 

@@ -5,11 +5,63 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.account import BonusLedger, UserNotification
+from apps.api.models.order import Order
 from apps.api.models.user import User
 from apps.api.services.referrals import round_money
 from apps.api.services.sessions import revoke_all_sessions
 
 MAX_ABS_DELTA = Decimal("1000000")
+CHECKOUT_SPEND_LEVEL = -1
+
+
+def resolve_bonus_spend(
+    requested: Decimal | None,
+    *,
+    balance: Decimal,
+    goods_total: Decimal,
+) -> Decimal:
+    amount = round_money(Decimal(str(requested or 0)))
+    if amount <= 0:
+        return Decimal("0.00")
+    goods = round_money(goods_total)
+    available = round_money(balance)
+    if amount > available:
+        raise ValueError("Недостаточно бонусов")
+    if amount > goods:
+        raise ValueError("Нельзя списать больше стоимости заказа")
+    return amount
+
+
+async def apply_checkout_spend(
+    db: AsyncSession,
+    user: User,
+    order: Order,
+    spend: Decimal,
+) -> None:
+    amount = round_money(spend)
+    if amount <= 0:
+        return
+    current = round_money(Decimal(str(user.bonus_balance or 0)))
+    if amount > current:
+        raise ValueError("Недостаточно бонусов")
+    user.bonus_balance = round_money(current - amount)
+    db.add(
+        BonusLedger(
+            user_id=user.id,
+            order_id=order.id,
+            level=CHECKOUT_SPEND_LEVEL,
+            amount=-amount,
+            note="Списание при заказе",
+        )
+    )
+    db.add(
+        UserNotification(
+            user_id=user.id,
+            kind="bonus",
+            title="Списание бонусов",
+            body=f"−{amount} ₽ за заказ {order.number}",
+        )
+    )
 
 
 async def apply_admin_bonus(

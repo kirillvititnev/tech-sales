@@ -80,6 +80,7 @@ type AuthContextValue = {
   loginTelegramWidget: (user: TelegramWidgetUser, privacyConsent?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   patchMe: (patch: { name?: string; phone?: string }) => Promise<void>;
+  reloadMe: () => Promise<void>;
   toggleFavorite: (productId: string) => Promise<void>;
   recordView: (productId: string) => void;
   loadOrders: () => Promise<Order[]>;
@@ -422,6 +423,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [authed],
   );
 
+  const reloadMe = useCallback(async () => {
+    const access = tokenRef.current;
+    if (!access) return;
+    try {
+      setMe(await fetchMe(access));
+    } catch {
+      // Keep the last known profile if refresh fails mid-checkout.
+    }
+  }, [fetchMe]);
+
   const toggleFavorite = useCallback(
     async (productId: string) => {
       if (!tokenRef.current) throw new Error("Нужен вход");
@@ -523,6 +534,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginTelegramWidget,
       logout,
       patchMe,
+      reloadMe,
       toggleFavorite,
       recordView,
       loadOrders,
@@ -546,6 +558,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginTelegramWidget,
       logout,
       patchMe,
+      reloadMe,
       toggleFavorite,
       recordView,
       loadOrders,

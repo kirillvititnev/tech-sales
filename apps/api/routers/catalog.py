@@ -19,6 +19,8 @@ from apps.api.security import escape_like, public_product_attributes
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
+CATALOG_ID_LOOKUP_LIMIT = 50
+
 SORT_OPTIONS = {
     "relevance",
     "price_asc",
@@ -263,8 +265,21 @@ async def list_products(
     sort: str = Query(default="relevance"),
     limit: int = Query(default=120, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    ids: list[UUID] | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[Product]:
+    if ids is not None:
+        if len(ids) > CATALOG_ID_LOOKUP_LIMIT:
+            raise HTTPException(status_code=400, detail="Не больше 50 товаров за запрос")
+        unique = list(dict.fromkeys(ids))
+        if not unique:
+            return []
+        loaded = await db.execute(
+            select(Product).where(Product.id.in_(unique), Product.is_published.is_(True))
+        )
+        found = {product.id: product for product in loaded.scalars().all()}
+        return [found[item] for item in unique if item in found]
+
     sort_key = sort if sort in SORT_OPTIONS else "relevance"
     stmt = _apply_product_filters(
         select(Product),

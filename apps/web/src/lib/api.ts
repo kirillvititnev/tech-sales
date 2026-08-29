@@ -80,6 +80,7 @@ export type CatalogQuery = {
   sort?: CatalogSort;
   limit?: number;
   offset?: number;
+  ids?: string[];
 };
 
 export type OrderItem = {
@@ -102,6 +103,7 @@ export type Order = {
   delivery_address?: string | null;
   comment?: string | null;
   total_amount: string;
+  bonus_spent?: string;
   items?: OrderItem[];
   access_token?: string | null;
 };
@@ -110,6 +112,12 @@ function buildCatalogParams(params?: CatalogQuery): URLSearchParams {
   const sp = new URLSearchParams();
   if (!params) {
     sp.set("limit", "200");
+    return sp;
+  }
+  if (params.ids?.length) {
+    for (const id of params.ids.slice(0, 50)) {
+      sp.append("ids", id);
+    }
     return sp;
   }
   if (params.hot) sp.set("hot", "true");

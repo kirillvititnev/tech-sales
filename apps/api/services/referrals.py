@@ -51,7 +51,11 @@ async def ancestor_ids(db: AsyncSession, user_id: UUID, *, depth: int = 3) -> li
 async def credit_paid_order(db: AsyncSession, order: Order, settings: StoreSettings) -> None:
     if order.user_id is None:
         return
-    existing = await db.execute(select(BonusLedger.id).where(BonusLedger.order_id == order.id).limit(1))
+    existing = await db.execute(
+        select(BonusLedger.id)
+        .where(BonusLedger.order_id == order.id, BonusLedger.level >= 1)
+        .limit(1)
+    )
     if existing.scalar_one_or_none() is not None:
         return
     percents = (

@@ -136,6 +136,12 @@ export function OrderConfirmation({
           <dt>Сумма</dt>
           <dd>{formatPrice(order.total_amount)}</dd>
         </div>
+        {order.bonus_spent && Number(order.bonus_spent) > 0 ? (
+          <div>
+            <dt>Бонусы</dt>
+            <dd>−{formatPrice(order.bonus_spent)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Контакт</dt>
           <dd>

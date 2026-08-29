@@ -99,7 +99,19 @@ def format_admin_order_message(
                 f"   {rank}. {_esc(_channel_label(quote))} — {format_rub(quote.price)}{mark}"
             )
 
-    lines.extend(["", f"<b>Итого витрина: {format_rub(order.total_amount)}</b>"])
+    spent = order.bonus_spent or Decimal("0")
+    if spent > 0:
+        goods = order.total_amount + spent
+        lines.extend(
+            [
+                "",
+                f"<b>Итого витрина: {format_rub(goods)}</b>",
+                f"Бонусы: −{format_rub(spent)}",
+                f"<b>К оплате: {format_rub(order.total_amount)}</b>",
+            ]
+        )
+    else:
+        lines.extend(["", f"<b>Итого витрина: {format_rub(order.total_amount)}</b>"])
     return "\n".join(lines)
 
 

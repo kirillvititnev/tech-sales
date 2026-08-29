@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -149,6 +150,27 @@ def test_order_requires_privacy_consent() -> None:
     del payload["privacy_consent"]
     try:
         OrderCreate.model_validate(payload)
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+
+
+def test_order_accepts_bonus_spend() -> None:
+    payload = OrderCreate.model_validate(_order_payload(bonus_spend="150.5"))
+    assert payload.bonus_spend == Decimal("150.50")
+
+
+def test_order_rejects_negative_bonus_spend() -> None:
+    try:
+        OrderCreate.model_validate(_order_payload(bonus_spend="-1"))
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+
+
+def test_order_rejects_bonus_balance_mass_assignment() -> None:
+    try:
+        OrderCreate.model_validate(_order_payload(bonus_balance=999))
         raise AssertionError("expected ValidationError")
     except ValidationError:
         pass
