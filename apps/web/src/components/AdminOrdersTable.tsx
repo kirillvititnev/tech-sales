@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 
-import { API_URL, formatPrice, type Order } from "@/lib/api";
+import { API_URL, apiErrorMessage, formatPrice, type Order } from "@/lib/api";
 import { adminFetch } from "@/lib/adminFetch";
 
 const CUSTOMER_RU: Record<string, string> = {
@@ -34,6 +34,7 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, { body: string; error: string | null }>>({});
 
   const sorted = useMemo(() => orders, [orders]);
 
@@ -74,6 +75,39 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
       setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, ...data } : o)));
     } catch {
       setError("Сеть недоступна");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendMessage(order: Order) {
+    const draft = drafts[order.id] ?? { body: "", error: null };
+    const body = draft.body.trim();
+    if (!body) {
+      setDrafts((prev) => ({ ...prev, [order.id]: { body: draft.body, error: "Напишите сообщение" } }));
+      return;
+    }
+    setBusy(order.id);
+    setError(null);
+    try {
+      const res = await adminFetch(`${API_URL}/api/v1/admin/orders/${order.id}/message`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDrafts((prev) => ({
+          ...prev,
+          [order.id]: { body: draft.body, error: apiErrorMessage(data, "Не удалось отправить") },
+        }));
+        return;
+      }
+      setDrafts((prev) => ({ ...prev, [order.id]: { body: "", error: null } }));
+    } catch {
+      setDrafts((prev) => ({
+        ...prev,
+        [order.id]: { body: draft.body, error: "Сеть недоступна" },
+      }));
     } finally {
       setBusy(null);
     }
@@ -205,6 +239,39 @@ export function AdminOrdersTable({ initialOrders }: { initialOrders: Order[] }) 
                               <p style={{ margin: 0 }}>{o.comment}</p>
                             </>
                           ) : null}
+                          <form
+                            className="admin-order-message"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void sendMessage(o);
+                            }}
+                          >
+                            <label htmlFor={`order-msg-${o.id}`}>
+                              Сообщение в кабинет
+                              <textarea
+                                id={`order-msg-${o.id}`}
+                                value={(drafts[o.id] ?? { body: "" }).body}
+                                maxLength={2000}
+                                disabled={busy === o.id}
+                                aria-invalid={drafts[o.id]?.error ? true : undefined}
+                                aria-describedby={drafts[o.id]?.error ? `order-msg-error-${o.id}` : undefined}
+                                onChange={(e) =>
+                                  setDrafts((prev) => ({
+                                    ...prev,
+                                    [o.id]: { body: e.target.value, error: null },
+                                  }))
+                                }
+                              />
+                            </label>
+                            {drafts[o.id]?.error ? (
+                              <p className="form-error" id={`order-msg-error-${o.id}`} role="alert">
+                                {drafts[o.id]?.error}
+                              </p>
+                            ) : null}
+                            <button type="submit" className="btn btn-ghost admin-btn" disabled={busy === o.id}>
+                              Отправить
+                            </button>
+                          </form>
                         </div>
                       </td>
                     </tr>

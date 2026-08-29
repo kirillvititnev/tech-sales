@@ -25,11 +25,18 @@ from apps.api.schemas.catalog import (
     StoreSettingsOut,
     StoreSettingsUpdate,
 )
-from apps.api.schemas.order import AdminOrderAction, AdminOrderOut, AdminOrderStatusUpdate
+from apps.api.schemas.order import AdminOrderAction, AdminOrderMessage, AdminOrderOut, AdminOrderStatusUpdate
 from apps.api.services.admin_catalog import get_or_create_store_settings, slugify_manual
 from apps.api.services.bonuses import apply_admin_bonus, set_user_active
-from apps.api.services.orders import apply_admin_status, cancel_order, customer_status_notice, mark_issued
+from apps.api.services.orders import (
+    apply_admin_status,
+    cancel_order,
+    customer_status_notice,
+    manager_notice,
+    mark_issued,
+)
 from apps.api.services.referrals import credit_paid_order
+from apps.api.services.reprice import reprice_synced_products
 
 from apps.api.security import escape_like, require_admin
 
@@ -89,9 +96,16 @@ async def patch_settings(
         row.referral_percent_l2 = payload.referral_percent_l2
     if payload.referral_percent_l3 is not None:
         row.referral_percent_l3 = payload.referral_percent_l3
+    markup_changed = (
+        payload.default_markup_percent is not None
+        or payload.price_round_to is not None
+        or payload.markup_rules is not None
+    )
     if payload.markup_rules is not None:
         row.markup_rules = _dump_markup_rules(payload.markup_rules)
         flag_modified(row, "markup_rules")
+    if markup_changed:
+        await reprice_synced_products(db, row)
     await db.commit()
     await db.refresh(row)
     return _settings_out(row)
@@ -322,6 +336,28 @@ async def order_action(
     )
     if notice:
         db.add(notice)
+    await db.commit()
+    loaded = await db.execute(_orders_query().where(Order.id == order.id))
+    return loaded.scalar_one()
+
+
+@router.post("/orders/{order_id}/message", response_model=AdminOrderOut)
+async def order_message(
+    order_id: UUID,
+    payload: AdminOrderMessage,
+    db: AsyncSession = Depends(get_db),
+) -> Order:
+    result = await db.execute(_orders_query().where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    notice = manager_notice(user_id=order.user_id, number=order.number, body=payload.body)
+    if notice is None:
+        raise HTTPException(
+            status_code=400,
+            detail="У заказа нет кабинета — напишите клиенту напрямую",
+        )
+    db.add(notice)
     await db.commit()
     loaded = await db.execute(_orders_query().where(Order.id == order.id))
     return loaded.scalar_one()

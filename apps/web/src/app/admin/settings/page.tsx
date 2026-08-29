@@ -152,7 +152,7 @@ export default function AdminSettingsPage() {
       }
       applySettings(await res.json());
       setFieldErrors({});
-      setMessage("Сохранено. Наценка подхватит следующие синки; рефералка действует на новые оплаты.");
+      setMessage("Сохранено. Цены на витрине пересчитаны. Рефералка действует на новые оплаты.");
     } catch {
       setError("Сеть недоступна");
     } finally {

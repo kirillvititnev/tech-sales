@@ -112,3 +112,17 @@ def customer_status_notice(
         title=f"Заказ {number}",
         body=f"Статус: {label}",
     )
+
+
+def manager_notice(*, user_id, number: str, body: str) -> UserNotification | None:
+    if user_id is None:
+        return None
+    text = (body or "").strip()
+    if not text:
+        return None
+    return UserNotification(
+        user_id=user_id,
+        kind="manager",
+        title=f"Заказ {number}",
+        body=text[:4000],
+    )

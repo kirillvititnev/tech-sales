@@ -8,6 +8,7 @@ from apps.api.services.orders import (
     apply_admin_status,
     cancel_order,
     customer_status_notice,
+    manager_notice,
     mark_issued,
     validate_contacts,
     validate_delivery,
@@ -112,6 +113,17 @@ def test_customer_status_notice_skips_guest_and_noop() -> None:
     )
     assert notice is not None
     assert "Оплачен" in notice.body
+
+
+def test_manager_notice_requires_cabinet() -> None:
+    assert manager_notice(user_id=None, number="WS-1", body="Завтра выдача") is None
+    user_id = uuid4()
+    note = manager_notice(user_id=user_id, number="WS-1", body="  Завтра выдача  ")
+    assert note is not None
+    assert note.kind == "manager"
+    assert note.user_id == user_id
+    assert note.body == "Завтра выдача"
+    assert "WS-1" in note.title
 
 
 def _order_payload(**overrides: object) -> dict:

@@ -12,7 +12,7 @@ from apps.api.schemas.account import (
     RegisterIn,
     TelegramLoginIn,
 )
-from apps.api.schemas.order import OrderCreate
+from apps.api.schemas.order import AdminOrderMessage, OrderCreate
 from apps.api.security import verify_telegram_login_widget
 from apps.api.services.passwords import hash_password, password_error, verify_password
 from apps.api.services.referrals import referral_credits
@@ -214,6 +214,11 @@ def test_mass_assignment_rejected_on_write_models() -> None:
         pass
     try:
         AdminUserPatch.model_validate({"is_active": False, "password_hash": "x"})
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+    try:
+        AdminOrderMessage.model_validate({"body": "Завтра выдача", "role": "admin"})
         raise AssertionError("expected ValidationError")
     except ValidationError:
         pass

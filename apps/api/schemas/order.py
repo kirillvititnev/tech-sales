@@ -91,3 +91,17 @@ class AdminOrderAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: str = Field(pattern="^(issue|cancel)$")
+
+
+class AdminOrderMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("body")
+    @classmethod
+    def strip_body(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Нужно сообщение")
+        return cleaned
