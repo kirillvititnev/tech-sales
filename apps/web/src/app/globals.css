@@ -749,6 +749,10 @@ a.btn,
   max-width: 34rem;
 }
 
+.settings-form {
+  max-width: 40rem;
+}
+
 .checkout-summary h3 {
   margin: 0.2rem 0 0.5rem;
   font-size: 1.25rem;
@@ -768,13 +772,21 @@ a.btn,
 }
 
 .checkout-form input:not([type="radio"]):not([type="checkbox"]),
+.checkout-form select,
 .checkout-form textarea {
   width: 100%;
+  min-height: 44px;
   padding: 0.75rem 0.85rem;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
   font: inherit;
+  border-radius: 0.65rem;
+}
+
+.checkout-form input[aria-invalid="true"],
+.checkout-form select[aria-invalid="true"] {
+  border-color: var(--hot);
 }
 
 .checkout-form input[type="radio"],
@@ -971,6 +983,33 @@ a.btn,
   cursor: not-allowed;
 }
 
+.admin-bonus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.admin-bonus input {
+  min-height: 44px;
+  min-width: 5.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  font: inherit;
+}
+
+.admin-bonus input[aria-invalid="true"] {
+  border-color: var(--hot);
+}
+
+.admin-bonus input:nth-of-type(2) {
+  min-width: 8rem;
+  flex: 1;
+}
+
 .mini-badge {
   font-size: 0.75rem;
   color: var(--mute);
@@ -1063,6 +1102,7 @@ a.btn,
 
 .admin-search input {
   flex: 1;
+  min-height: 44px;
   padding: 0.65rem 0.85rem;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -1298,12 +1338,57 @@ a.btn,
   min-height: 44px;
 }
 
+a.account-row {
+  text-decoration: none;
+  color: inherit;
+  width: 100%;
+  border-radius: 0.5rem;
+}
+
+a.account-row:hover {
+  color: var(--fill);
+}
+
+a.account-row:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 .account-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
   gap: 0.15rem;
+}
+
+.settings-rules {
+  gap: 0;
+}
+
+.settings-rule {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-rule:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.settings-rule-fields {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 9rem) minmax(0, 1fr) minmax(6rem, 7.5rem);
+  gap: 0.5rem;
+  align-items: end;
+}
+
+@media (max-width: 640px) {
+  .settings-rule-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .account-meta,

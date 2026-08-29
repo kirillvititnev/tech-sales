@@ -271,6 +271,12 @@ def rate_limit_rule(method: str, path: str) -> tuple[str, int, float] | None:
         return ("auth", 12, 60.0)
     if method == "GET" and "/api/v1/orders/by-number/" in path:
         return ("order-lookup", 20, 60.0)
+    if (
+        method == "GET"
+        and path.startswith("/api/v1/me/orders/")
+        and path.rstrip("/") != "/api/v1/me/orders"
+    ):
+        return ("me-order", 30, 60.0)
     if method == "GET" and path.rstrip("/") == "/api/v1/me/export":
         return ("me-export", 6, 60.0)
     if method == "POST" and path.rstrip("/") == "/api/v1/me/delete":

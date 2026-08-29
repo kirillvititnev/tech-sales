@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -127,6 +128,9 @@ class StoreSettings(Base):
     referral_percent_l1: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=Decimal("5"))
     referral_percent_l2: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=Decimal("2"))
     referral_percent_l3: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=Decimal("1"))
+    markup_rules: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -1,7 +1,8 @@
 """Telegram channel parser (MTProto via Telethon).
 
 Parses text price lists from supplier channels on a schedule.
-PDF/Excel extraction hooks are prepared; OCR is out of MVP scope.
+PDF/Excel attachments are converted to text in attachments.py, then this parser.
+OCR of photos is out of MVP scope.
 """
 
 from __future__ import annotations

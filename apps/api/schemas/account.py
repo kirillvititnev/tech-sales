@@ -147,10 +147,47 @@ class BonusExportOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    order_id: UUID
+    order_id: UUID | None
     level: int
     amount: Decimal
     created_at: datetime
+    note: str | None = None
+
+
+class AdminUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str | None
+    name: str | None
+    phone: str | None
+    telegram_id: str | None
+    referral_code: str
+    bonus_balance: Decimal
+    is_active: bool
+    created_at: datetime
+    referred_by_id: UUID | None = None
+
+
+class AdminUserPatch(BaseModel):
+    model_config = _STRICT
+
+    is_active: bool
+
+
+class AdminBonusAdjust(BaseModel):
+    model_config = _STRICT
+
+    delta: Decimal
+    note: str | None = Field(default=None, max_length=255)
+
+    @field_validator("note")
+    @classmethod
+    def strip_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class DataExportOut(BaseModel):

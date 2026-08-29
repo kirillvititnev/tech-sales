@@ -339,14 +339,19 @@ export function AccountCabinet({
           ) : (
             <ul className="account-list">
               {orders.map((order) => (
-                <li key={order.id} className="account-row">
-                  <span>
-                    {order.number}
-                    <span className="account-meta">
-                      {STATUS_RU[order.customer_status] ?? order.customer_status}
+                <li key={order.id}>
+                  <Link
+                    href={`${isMini ? "/mini/order" : "/order"}/${encodeURIComponent(order.number)}`}
+                    className="account-row"
+                  >
+                    <span>
+                      {order.number}
+                      <span className="account-meta">
+                        {STATUS_RU[order.customer_status] ?? order.customer_status}
+                      </span>
                     </span>
-                  </span>
-                  <strong>{formatPrice(order.total_amount)}</strong>
+                    <strong>{formatPrice(order.total_amount)}</strong>
+                  </Link>
                 </li>
               ))}
             </ul>

@@ -5,7 +5,13 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from apps.api.schemas.account import ProfilePatch, RegisterIn, TelegramLoginIn
+from apps.api.schemas.account import (
+    AdminBonusAdjust,
+    AdminUserPatch,
+    ProfilePatch,
+    RegisterIn,
+    TelegramLoginIn,
+)
 from apps.api.schemas.order import OrderCreate
 from apps.api.security import verify_telegram_login_widget
 from apps.api.services.passwords import hash_password, password_error, verify_password
@@ -198,6 +204,16 @@ def test_mass_assignment_rejected_on_write_models() -> None:
                 "admin_status": "paid",
             }
         )
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+    try:
+        AdminBonusAdjust.model_validate({"delta": 100, "role": "admin", "bonus_balance": 999})
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+    try:
+        AdminUserPatch.model_validate({"is_active": False, "password_hash": "x"})
         raise AssertionError("expected ValidationError")
     except ValidationError:
         pass

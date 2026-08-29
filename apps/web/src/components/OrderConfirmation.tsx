@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { API_URL, formatPrice, type Order } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 const STATUS_RU: Record<string, string> = {
   placed: "Оформлен",
@@ -28,31 +29,46 @@ export function OrderConfirmation({
   const searchParams = useSearchParams();
   const number = decodeURIComponent(params?.number ?? "").toUpperCase();
   const access = searchParams.get("access") ?? "";
+  const { authFetch, token, ready } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!number || !access) {
+    if (!number) {
+      setLoading(false);
+      setError("not_found");
+      return;
+    }
+    if (!access && !ready) {
+      return;
+    }
+    if (!access && ready && !token) {
       setLoading(false);
       setError("not_found");
       return;
     }
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
-        const res = await fetch(
-          `${API_URL}/api/v1/orders/by-number/${encodeURIComponent(number)}?access=${encodeURIComponent(access)}`,
-          { cache: "no-store" },
-        );
+        const res = access
+          ? await fetch(
+              `${API_URL}/api/v1/orders/by-number/${encodeURIComponent(number)}?access=${encodeURIComponent(access)}`,
+              { cache: "no-store" },
+            )
+          : await authFetch(`/api/v1/me/orders/${encodeURIComponent(number)}`);
         if (!res.ok) {
           throw new Error(res.status === 404 ? "not_found" : "fail");
         }
         const data = (await res.json()) as Order;
-        if (!cancelled) setOrder(data);
+        if (!cancelled) {
+          setOrder(data);
+          setError(null);
+        }
       } catch (e) {
         if (!cancelled) {
-          // Order was created (admin has it) — still show the number.
+          setOrder(null);
           setError(e instanceof Error && e.message === "not_found" ? "not_found" : "load_fail");
         }
       } finally {
@@ -62,7 +78,7 @@ export function OrderConfirmation({
     return () => {
       cancelled = true;
     };
-  }, [number, access]);
+  }, [number, access, ready, token, authFetch]);
 
   if (loading) {
     return (
@@ -80,7 +96,9 @@ export function OrderConfirmation({
         <h2>{number || "—"}</h2>
         <p className="lead">
           {error === "not_found"
-            ? "Заказ записан. Откройте ссылку из письма/экрана подтверждения — в ней есть ключ доступа."
+            ? access
+              ? "Заказ записан. Откройте ссылку из письма/экрана подтверждения — в ней есть ключ доступа."
+              : "Заказ не найден. Войдите в кабинет, если оформляли его с этого аккаунта."
             : "Заказ отправлен. Менеджер свяжется с вами для оплаты. Детали заказа подгрузятся при обновлении страницы."}
         </p>
         <div className="cta-row">

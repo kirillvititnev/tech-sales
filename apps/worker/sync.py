@@ -23,12 +23,15 @@ from apps.api.models.catalog import (
     ProductOffer,
     SupplierChannel,
 )
-from apps.api.services.pricing import storefront_price
+from apps.api.services.admin_alerts import is_price_jump, notify_admin_ops
+from apps.api.services.favorite_alerts import notify_favorite_watchers, watches_for_update
+from apps.api.services.pricing import resolve_markup, storefront_price
 from apps.worker.config import get_worker_settings
 from apps.worker.folders import get_folder_channels
 from apps.worker.offer_identity import OfferKind, classify_offer, min_price_for_kind
 from apps.worker.parser import normalize_title, parse_price_text
 from apps.worker.tg import make_telegram_client
+from apps.worker.attachments import message_price_texts
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,12 @@ def external_key(raw_title: str, message_id: int | None = None) -> str:
 async def ensure_schema(session: AsyncSession) -> None:
     await session.execute(
         text("ALTER TABLE supplier_channels ADD COLUMN IF NOT EXISTS folder_label VARCHAR(128)")
+    )
+    await session.execute(
+        text(
+            "ALTER TABLE store_settings "
+            "ADD COLUMN IF NOT EXISTS markup_rules JSONB NOT NULL DEFAULT '[]'::jsonb"
+        )
     )
     await session.commit()
 
@@ -96,6 +105,7 @@ async def sync_folder(
 ) -> dict[str, int]:
     worker_settings = get_worker_settings()
     markup = worker_settings.default_markup_percent
+    markup_rules: list = []
     round_to = worker_settings.price_round_to
     min_price = Decimal(worker_settings.min_offer_price_rub)
 
@@ -107,7 +117,17 @@ async def sync_folder(
         "products": 0,
         "rejected": 0,
         "errors": 0,
+        "attachments": 0,
+        "favorite_notices": 0,
     }
+    parse_errors: list[tuple[str, str]] = []
+    price_jumps: list[tuple[str, Decimal, Decimal]] = []
+
+    async def _flush_alerts() -> None:
+        try:
+            await notify_admin_ops(folder_name, parse_errors, price_jumps)
+        except Exception:  # noqa: BLE001
+            logger.exception("Admin ops alert failed")
 
     client = make_telegram_client()
     async with client:
@@ -132,6 +152,7 @@ async def sync_folder(
 
                 store = await get_or_create_store_settings(session)
                 markup = float(store.default_markup_percent)
+                markup_rules = list(store.markup_rules or [])
                 round_to = int(store.price_round_to)
                 await session.commit()
             except Exception:  # noqa: BLE001
@@ -152,6 +173,7 @@ async def sync_folder(
 
             display_meta: dict[str, dict] = {}
             synced_channel_ids: list = []
+            favorite_events: list = []
 
             for fc in folder_channels:
                 channel: SupplierChannel | None = None
@@ -174,87 +196,97 @@ async def sync_folder(
                     active_keys: set[str] = set()
 
                     for msg in messages:
-                        text = msg.message or ""
-                        if not text.strip():
+                        doc = msg.document
+                        blobs = await message_price_texts(
+                            caption=msg.message,
+                            document=doc,
+                            size=getattr(doc, "size", None) if doc is not None else None,
+                            mime=getattr(doc, "mime_type", None) if doc is not None else None,
+                            download=lambda m=msg: client.download_media(m, file=bytes),
+                        )
+                        if not blobs:
                             continue
                         stats["messages"] += 1
-                        for line in parse_price_text(text):
-                            stats["lines"] += 1
-                            if line.price < min_price:
-                                stats["rejected"] += 1
-                                continue
-                            identity = classify_offer(line.title, section=line.section)
-                            # title already has careful section glue from parser
-                            if not identity.publish or not identity.identity_key:
-                                stats["rejected"] += 1
-                                continue
-                            floor = max(min_price, Decimal(min_price_for_kind(identity.kind)))
-                            if line.price < floor:
-                                stats["rejected"] += 1
-                                continue
+                        if doc is not None:
+                            stats["attachments"] += 1
+                        for text in blobs:
+                            for line in parse_price_text(text):
+                                stats["lines"] += 1
+                                if line.price < min_price:
+                                    stats["rejected"] += 1
+                                    continue
+                                identity = classify_offer(line.title, section=line.section)
+                                # title already has careful section glue from parser
+                                if not identity.publish or not identity.identity_key:
+                                    stats["rejected"] += 1
+                                    continue
+                                floor = max(min_price, Decimal(min_price_for_kind(identity.kind)))
+                                if line.price < floor:
+                                    stats["rejected"] += 1
+                                    continue
 
-                            ext = external_key(line.title, msg.id)
-                            active_keys.add(ext)
-                            meta = display_meta.setdefault(
-                                identity.identity_key,
-                                {
-                                    "title": identity.display_title,
-                                    "brand": identity.brand,
-                                    "device_category": identity.device_category,
-                                    "device_name": identity.device_name,
-                                    "config": identity.config,
-                                    "model": identity.model,
-                                    "storage": identity.storage,
-                                    "color": identity.color,
-                                    "sim": identity.sim,
-                                    "ram": identity.ram,
-                                    "regions": set(),
-                                    "kind": identity.kind.value,
-                                    "band": identity.band,
-                                    "model_code": identity.model_code,
-                                },
-                            )
-                            if identity.region:
-                                meta["regions"].add(identity.region)
-
-                            existing = await session.execute(
-                                select(ProductOffer).where(
-                                    ProductOffer.channel_id == channel.id,
-                                    ProductOffer.external_key == ext,
+                                ext = external_key(line.title, msg.id)
+                                active_keys.add(ext)
+                                meta = display_meta.setdefault(
+                                    identity.identity_key,
+                                    {
+                                        "title": identity.display_title,
+                                        "brand": identity.brand,
+                                        "device_category": identity.device_category,
+                                        "device_name": identity.device_name,
+                                        "config": identity.config,
+                                        "model": identity.model,
+                                        "storage": identity.storage,
+                                        "color": identity.color,
+                                        "sim": identity.sim,
+                                        "ram": identity.ram,
+                                        "regions": set(),
+                                        "kind": identity.kind.value,
+                                        "band": identity.band,
+                                        "model_code": identity.model_code,
+                                    },
                                 )
-                            )
-                            offer = existing.scalar_one_or_none()
-                            payload = {
-                                "message_id": msg.id,
-                                "date": msg.date.isoformat() if msg.date else None,
-                                "raw": line.raw,
-                                "section": line.section,
-                                "identity_key": identity.identity_key,
-                                "sim": identity.sim,
-                                "region": identity.region,
-                                "model": identity.model,
-                            }
-                            if offer is None:
-                                session.add(
-                                    ProductOffer(
-                                        channel_id=channel.id,
-                                        external_key=ext,
-                                        raw_title=line.title,
-                                        raw_price=line.price,
-                                        currency="RUB",
-                                        source_message_id=str(msg.id),
-                                        raw_payload=payload,
-                                        is_active=True,
+                                if identity.region:
+                                    meta["regions"].add(identity.region)
+
+                                existing = await session.execute(
+                                    select(ProductOffer).where(
+                                        ProductOffer.channel_id == channel.id,
+                                        ProductOffer.external_key == ext,
                                     )
                                 )
-                            else:
-                                offer.raw_title = line.title
-                                offer.raw_price = line.price
-                                offer.source_message_id = str(msg.id)
-                                offer.raw_payload = payload
-                                offer.is_active = True
-                                offer.parsed_at = datetime.now(timezone.utc)
-                            stats["offers"] += 1
+                                offer = existing.scalar_one_or_none()
+                                payload = {
+                                    "message_id": msg.id,
+                                    "date": msg.date.isoformat() if msg.date else None,
+                                    "raw": line.raw,
+                                    "section": line.section,
+                                    "identity_key": identity.identity_key,
+                                    "sim": identity.sim,
+                                    "region": identity.region,
+                                    "model": identity.model,
+                                }
+                                if offer is None:
+                                    session.add(
+                                        ProductOffer(
+                                            channel_id=channel.id,
+                                            external_key=ext,
+                                            raw_title=line.title,
+                                            raw_price=line.price,
+                                            currency="RUB",
+                                            source_message_id=str(msg.id),
+                                            raw_payload=payload,
+                                            is_active=True,
+                                        )
+                                    )
+                                else:
+                                    offer.raw_title = line.title
+                                    offer.raw_price = line.price
+                                    offer.source_message_id = str(msg.id)
+                                    offer.raw_payload = payload
+                                    offer.is_active = True
+                                    offer.parsed_at = datetime.now(timezone.utc)
+                                stats["offers"] += 1
 
                     if active_keys:
                         all_offers = await session.execute(
@@ -282,6 +314,7 @@ async def sync_folder(
                             await session.commit()
                         except Exception:  # noqa: BLE001
                             await session.rollback()
+                    parse_errors.append((fc.title, str(exc)[:1000]))
 
             channel_ids = (
                 synced_channel_ids
@@ -295,6 +328,7 @@ async def sync_folder(
 
             if not channel_ids:
                 logger.warning("No channels stored for folder %s", folder_name)
+                await _flush_alerts()
                 return stats
 
             offers = list(
@@ -391,7 +425,14 @@ async def sync_folder(
                 prices = [Decimal(o.raw_price) for o in offer_list if Decimal(o.raw_price) >= floor]
                 if not prices:
                     continue
-                cost, price = storefront_price(prices, markup_percent=markup, round_to=round_to)
+                markup_pct = resolve_markup(
+                    markup,
+                    markup_rules,
+                    brand=brand,
+                    category=str(meta.get("device_category") or "") or None,
+                    kind=kind,
+                )
+                cost, price = storefront_price(prices, markup_percent=markup_pct, round_to=round_to)
                 if cost < floor:
                     continue
                 slug = make_slug(key, title)
@@ -436,7 +477,7 @@ async def sync_folder(
                         attributes=attrs,
                         cost_median=cost,
                         price=price,
-                        markup_percent=Decimal(str(markup)),
+                        markup_percent=Decimal(str(markup_pct)),
                         is_manual=False,
                         is_hot=False,
                         is_published=True,
@@ -445,15 +486,31 @@ async def sync_folder(
                     await session.flush()
                     stats["products"] += 1
                 else:
+                    old_price = product.price
+                    was_published = bool(product.is_published)
                     product.title = title
                     product.brand = brand or product.brand
                     product.category_id = category.id
                     product.cost_median = cost
                     product.price = price
-                    product.markup_percent = Decimal(str(markup))
+                    product.markup_percent = Decimal(str(markup_pct))
                     product.is_published = True
                     product.attributes = attrs
                     stats["products"] += 1
+                    if is_price_jump(
+                        Decimal(str(old_price)) if old_price is not None else None,
+                        price,
+                    ):
+                        price_jumps.append((title, Decimal(str(old_price)), price))
+                    favorite_events.extend(
+                        watches_for_update(
+                            product_id=product.id,
+                            title=title,
+                            was_published=was_published,
+                            old_price=Decimal(str(old_price)) if old_price is not None else None,
+                            new_price=price,
+                        )
+                    )
 
                 seen_product_ids.add(product.id)
                 for offer in offer_list:
@@ -471,8 +528,13 @@ async def sync_folder(
                     if product.id not in seen_product_ids:
                         product.is_published = False
 
+            try:
+                stats["favorite_notices"] = await notify_favorite_watchers(session, favorite_events)
+            except Exception:  # noqa: BLE001
+                logger.exception("Favorite watch notices failed")
             await session.commit()
 
+    await _flush_alerts()
     logger.info("Sync done: %s", stats)
     return stats
 
@@ -486,6 +548,10 @@ async def run_parse_cycle(folder_name: str | None = None) -> dict[str, int]:
     folder = folder_name or "Apple"
     try:
         return await sync_folder(folder)
-    except Exception:
+    except Exception as exc:
         logger.exception("Parse cycle failed")
+        try:
+            await notify_admin_ops(folder, [("цикл парсинга", str(exc)[:300])], [])
+        except Exception:  # noqa: BLE001
+            logger.exception("Admin ops alert failed")
         return {"channels": 0, "lines": 0, "skipped": 0, "errors": 1}

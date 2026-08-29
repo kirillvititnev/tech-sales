@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -119,12 +119,29 @@ class OfferLogOut(BaseModel):
     folder_label: str | None = None
 
 
+class MarkupRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    match: Literal["brand", "category", "kind"]
+    value: str = Field(min_length=1, max_length=128)
+    percent: Decimal = Field(ge=0, le=100)
+
+    @field_validator("value")
+    @classmethod
+    def strip_value(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Нужно значение")
+        return cleaned
+
+
 class StoreSettingsOut(BaseModel):
     default_markup_percent: Decimal
     price_round_to: int
     referral_percent_l1: Decimal
     referral_percent_l2: Decimal
     referral_percent_l3: Decimal
+    markup_rules: list[MarkupRule] = Field(default_factory=list)
 
 
 class StoreSettingsUpdate(BaseModel):
@@ -134,6 +151,7 @@ class StoreSettingsUpdate(BaseModel):
     referral_percent_l1: Decimal | None = Field(default=None, ge=0, le=50)
     referral_percent_l2: Decimal | None = Field(default=None, ge=0, le=50)
     referral_percent_l3: Decimal | None = Field(default=None, ge=0, le=50)
+    markup_rules: list[MarkupRule] | None = Field(default=None, max_length=50)
 
 
 class SuggestItemOut(BaseModel):

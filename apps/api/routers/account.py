@@ -73,6 +73,23 @@ async def my_orders(
     ]
 
 
+@router.get("/orders/{number}", response_model=OrderOut)
+async def my_order(
+    number: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> OrderOut:
+    result = await db.execute(
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.number == number.upper(), Order.user_id == user.id)
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    return OrderOut.model_validate(order).model_copy(update={"access_token": None})
+
+
 @router.get("/favorites", response_model=list[ProductOut])
 async def list_favorites(
     user: User = Depends(require_user),

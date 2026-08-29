@@ -2,13 +2,17 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from pydantic import ValidationError
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from apps.api.db import get_db
 from apps.api.models.catalog import ChannelStatus, Product, ProductOffer, SupplierChannel
 from apps.api.models.order import CustomerOrderStatus, Order
+from apps.api.models.user import User
+from apps.api.schemas.account import AdminBonusAdjust, AdminUserOut, AdminUserPatch
 from apps.api.schemas.catalog import (
     AdminProductOut,
     AdminProductPatch,
@@ -16,22 +20,40 @@ from apps.api.schemas.catalog import (
     ChannelOut,
     ChannelStatusUpdate,
     ManualProductCreate,
+    MarkupRule,
     OfferLogOut,
     StoreSettingsOut,
     StoreSettingsUpdate,
 )
 from apps.api.schemas.order import AdminOrderAction, AdminOrderOut, AdminOrderStatusUpdate
 from apps.api.services.admin_catalog import get_or_create_store_settings, slugify_manual
+from apps.api.services.bonuses import apply_admin_bonus, set_user_active
 from apps.api.services.orders import apply_admin_status, cancel_order, customer_status_notice, mark_issued
 from apps.api.services.referrals import credit_paid_order
 
-from apps.api.security import require_admin
+from apps.api.security import escape_like, require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 def _orders_query():
     return select(Order).options(selectinload(Order.items))
+
+
+def _parse_markup_rules(raw: object) -> list[MarkupRule]:
+    if not isinstance(raw, list):
+        return []
+    parsed: list[MarkupRule] = []
+    for item in raw:
+        try:
+            parsed.append(MarkupRule.model_validate(item))
+        except ValidationError:
+            continue
+    return parsed
+
+
+def _dump_markup_rules(rules: list[MarkupRule]) -> list[dict]:
+    return [{"match": rule.match, "value": rule.value, "percent": float(rule.percent)} for rule in rules]
 
 
 def _settings_out(row) -> StoreSettingsOut:
@@ -41,6 +63,7 @@ def _settings_out(row) -> StoreSettingsOut:
         referral_percent_l1=row.referral_percent_l1,
         referral_percent_l2=row.referral_percent_l2,
         referral_percent_l3=row.referral_percent_l3,
+        markup_rules=_parse_markup_rules(row.markup_rules),
     )
 
 
@@ -66,6 +89,9 @@ async def patch_settings(
         row.referral_percent_l2 = payload.referral_percent_l2
     if payload.referral_percent_l3 is not None:
         row.referral_percent_l3 = payload.referral_percent_l3
+    if payload.markup_rules is not None:
+        row.markup_rules = _dump_markup_rules(payload.markup_rules)
+        flag_modified(row, "markup_rules")
     await db.commit()
     await db.refresh(row)
     return _settings_out(row)
@@ -118,8 +144,9 @@ async def admin_list_products(
     db: AsyncSession = Depends(get_db),
 ) -> list[Product]:
     stmt = select(Product)
-    if q:
-        stmt = stmt.where(Product.title.ilike(f"%{q}%"))
+    if q and q.strip():
+        term = f"%{escape_like(q.strip())}%"
+        stmt = stmt.where(Product.title.ilike(term, escape="\\"))
     stmt = stmt.order_by(Product.updated_at.desc()).limit(limit).offset(offset)
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -298,3 +325,127 @@ async def order_action(
     await db.commit()
     loaded = await db.execute(_orders_query().where(Order.id == order.id))
     return loaded.scalar_one()
+
+
+async def _get_user(db: AsyncSession, user_id: UUID) -> User:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return user
+
+
+@router.get("/users", response_model=list[AdminUserOut])
+async def list_users(
+    q: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> list[User]:
+    stmt = select(User)
+    needle = (q or "").strip()
+    if needle:
+        term = f"%{escape_like(needle)}%"
+        stmt = stmt.where(
+            or_(
+                User.email.ilike(term, escape="\\"),
+                User.name.ilike(term, escape="\\"),
+                User.phone.ilike(term, escape="\\"),
+                User.telegram_id.ilike(term, escape="\\"),
+                User.referral_code.ilike(term, escape="\\"),
+            )
+        )
+    stmt = stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.patch("/users/{user_id}", response_model=AdminUserOut)
+async def patch_user(
+    user_id: UUID,
+    payload: AdminUserPatch,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user = await _get_user(db, user_id)
+    await set_user_active(db, user, is_active=payload.is_active)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.post("/users/{user_id}/bonus", response_model=AdminUserOut)
+async def adjust_user_bonus(
+    user_id: UUID,
+    payload: AdminBonusAdjust,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user = await _get_user(db, user_id)
+    try:
+        await apply_admin_bonus(db, user, delta=payload.delta, note=payload.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def _get_user(db: AsyncSession, user_id: UUID) -> User:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return user
+
+
+@router.get("/users", response_model=list[AdminUserOut])
+async def list_users(
+    q: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> list[User]:
+    stmt = select(User)
+    needle = (q or "").strip()
+    if needle:
+        term = f"%{escape_like(needle)}%"
+        stmt = stmt.where(
+            or_(
+                User.email.ilike(term, escape="\\"),
+                User.name.ilike(term, escape="\\"),
+                User.phone.ilike(term, escape="\\"),
+                User.telegram_id.ilike(term, escape="\\"),
+                User.referral_code.ilike(term, escape="\\"),
+            )
+        )
+    stmt = stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.patch("/users/{user_id}", response_model=AdminUserOut)
+async def patch_user(
+    user_id: UUID,
+    payload: AdminUserPatch,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user = await _get_user(db, user_id)
+    await set_user_active(db, user, is_active=payload.is_active)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.post("/users/{user_id}/bonus", response_model=AdminUserOut)
+async def adjust_user_bonus(
+    user_id: UUID,
+    payload: AdminBonusAdjust,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user = await _get_user(db, user_id)
+    try:
+        await apply_admin_bonus(db, user, delta=payload.delta, note=payload.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(user)
+    return user

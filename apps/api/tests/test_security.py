@@ -75,6 +75,8 @@ def test_rate_limit_rules() -> None:
     assert rate_limit_rule("POST", "/api/v1/auth/login")[1] == 5
     assert rate_limit_rule("POST", "/api/v1/auth/refresh")[0] == "auth-refresh"
     assert rate_limit_rule("GET", "/api/v1/orders/by-number/WS-1")[0] == "order-lookup"
+    assert rate_limit_rule("GET", "/api/v1/me/orders/WS-1")[0] == "me-order"
+    assert rate_limit_rule("GET", "/api/v1/me/orders")[0] == "global"
     assert rate_limit_rule("GET", "/api/v1/admin/orders")[0] == "admin"
 
 
