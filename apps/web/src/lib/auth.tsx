@@ -66,6 +66,7 @@ type AuthContextValue = {
   me: Me | null;
   ready: boolean;
   favoriteIds: Set<string>;
+  unreadCount: number;
   authHeaders: () => HeadersInit;
   authFetch: (path: string, init?: RequestInit) => Promise<Response>;
   login: (email: string, password: string) => Promise<void>;
@@ -88,11 +89,17 @@ type AuthContextValue = {
   loadViews: () => Promise<Product[]>;
   loadNotifications: () => Promise<AccountNotification[]>;
   markNotificationRead: (id: string) => Promise<void>;
+  refreshUnread: () => Promise<void>;
   exportMyData: () => Promise<unknown>;
   deleteAccount: (password?: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function parseUnreadPayload(data: { unread?: unknown }): number {
+  const value = Number(data.unread);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
 
 function storedReferral(): string | null {
   if (typeof window === "undefined") return null;
@@ -151,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [ready, setReady] = useState(false);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [unreadCount, setUnreadCount] = useState(0);
   const tokenRef = useRef<string | null>(null);
   const refreshRef = useRef<string | null>(null);
   const refreshLock = useRef<Promise<string | null> | null>(null);
@@ -163,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setMe(null);
     setFavoriteIds(new Set());
+    setUnreadCount(0);
   }, []);
 
   const fetchFavoriteIds = useCallback(async (access: string): Promise<Set<string>> => {
@@ -184,6 +193,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.json() as Promise<Me>;
   }, []);
 
+  const fetchUnread = useCallback(async (access: string): Promise<number> => {
+    const res = await fetch(`${API_URL}/api/v1/me/notifications/unread-count`, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${access}` },
+    });
+    if (!res.ok) return 0;
+    const data = (await res.json()) as { unread?: unknown };
+    return parseUnreadPayload(data);
+  }, []);
+
   const applySession = useCallback(
     async (data: TokenResponse) => {
       const session = writeSession(data);
@@ -193,8 +212,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const profile = await fetchMe(session.access_token);
       setMe(profile);
       setFavoriteIds(await fetchFavoriteIds(session.access_token));
+      setUnreadCount(await fetchUnread(session.access_token));
     },
-    [fetchFavoriteIds, fetchMe],
+    [fetchFavoriteIds, fetchMe, fetchUnread],
   );
 
   const refreshAccess = useCallback(async (): Promise<string | null> => {
@@ -257,6 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(tokenRef.current);
         setMe(profile);
         setFavoriteIds(favs);
+        setUnreadCount(await fetchUnread(tokenRef.current));
       } catch {
         clearSession();
       } finally {
@@ -266,7 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [clearSession, fetchFavoriteIds, fetchMe, refreshAccess]);
+  }, [clearSession, fetchFavoriteIds, fetchMe, fetchUnread, refreshAccess]);
 
   useEffect(() => {
     if (!ready || token) return;
@@ -323,6 +344,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [refreshAccess],
   );
+
+  const refreshUnread = useCallback(async () => {
+    if (!tokenRef.current) {
+      setUnreadCount(0);
+      return;
+    }
+    const res = await authed("/api/v1/me/notifications/unread-count");
+    if (!res.ok) {
+      setUnreadCount(0);
+      return;
+    }
+    const data = (await res.json()) as { unread?: unknown };
+    setUnreadCount(parseUnreadPayload(data));
+  }, [authed]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -498,6 +533,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       const res = await authed(`/api/v1/me/notifications/${id}/read`, { method: "POST" });
       if (!res.ok) throw new Error(await parseError(res, "Не удалось отметить уведомление"));
+      setUnreadCount((count) => Math.max(0, count - 1));
     },
     [authed],
   );
@@ -520,12 +556,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [authed, clearSession],
   );
 
+  useEffect(() => {
+    if (!ready || !me) return;
+    const onFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshUnread();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [ready, me, refreshUnread]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       token,
       me,
       ready,
       favoriteIds,
+      unreadCount,
       authHeaders,
       authFetch: authed,
       login,
@@ -542,6 +593,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loadViews,
       loadNotifications,
       markNotificationRead,
+      refreshUnread,
       exportMyData,
       deleteAccount,
     }),
@@ -550,6 +602,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       me,
       ready,
       favoriteIds,
+      unreadCount,
       authHeaders,
       authed,
       login,
@@ -566,6 +619,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loadViews,
       loadNotifications,
       markNotificationRead,
+      refreshUnread,
       exportMyData,
       deleteAccount,
     ],

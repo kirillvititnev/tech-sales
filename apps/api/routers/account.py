@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +21,7 @@ from apps.api.schemas.account import (
     MeOut,
     NotificationOut,
     ProfilePatch,
+    UnreadNotificationsOut,
     ViewIn,
 )
 from apps.api.schemas.catalog import ProductOut
@@ -188,6 +189,19 @@ async def list_notifications(
         .limit(50)
     )
     return list(result.scalars().all())
+
+
+@router.get("/notifications/unread-count", response_model=UnreadNotificationsOut)
+async def unread_notification_count(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> UnreadNotificationsOut:
+    total = await db.execute(
+        select(func.count())
+        .select_from(UserNotification)
+        .where(UserNotification.user_id == user.id, UserNotification.read_at.is_(None))
+    )
+    return UnreadNotificationsOut(unread=int(total.scalar_one()))
 
 
 @router.post("/notifications/{note_id}/read", response_model=NotificationOut)

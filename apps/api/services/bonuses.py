@@ -37,10 +37,10 @@ async def apply_checkout_spend(
     user: User,
     order: Order,
     spend: Decimal,
-) -> None:
+) -> UserNotification | None:
     amount = round_money(spend)
     if amount <= 0:
-        return
+        return None
     current = round_money(Decimal(str(user.bonus_balance or 0)))
     if amount > current:
         raise ValueError("Недостаточно бонусов")
@@ -54,14 +54,14 @@ async def apply_checkout_spend(
             note="Списание при заказе",
         )
     )
-    db.add(
-        UserNotification(
-            user_id=user.id,
-            kind="bonus",
-            title="Списание бонусов",
-            body=f"−{amount} ₽ за заказ {order.number}",
-        )
+    notice = UserNotification(
+        user_id=user.id,
+        kind="bonus",
+        title="Списание бонусов",
+        body=f"−{amount} ₽ за заказ {order.number}",
     )
+    db.add(notice)
+    return notice
 
 
 async def apply_admin_bonus(
@@ -70,7 +70,7 @@ async def apply_admin_bonus(
     *,
     delta: Decimal,
     note: str | None,
-) -> User:
+) -> tuple[User, UserNotification]:
     amount = round_money(delta)
     if amount == 0:
         raise ValueError("Сумма не должна быть нулевой")
@@ -92,15 +92,14 @@ async def apply_admin_bonus(
         )
     )
     sign = "+" if amount > 0 else ""
-    db.add(
-        UserNotification(
-            user_id=user.id,
-            kind="bonus",
-            title="Бонусный счёт",
-            body=f"Админ: {sign}{amount} ₽" + (f". {cleaned}" if cleaned else ""),
-        )
+    notice = UserNotification(
+        user_id=user.id,
+        kind="bonus",
+        title="Бонусный счёт",
+        body=f"Админ: {sign}{amount} ₽" + (f". {cleaned}" if cleaned else ""),
     )
-    return user
+    db.add(notice)
+    return user, notice
 
 
 async def set_user_active(db: AsyncSession, user: User, *, is_active: bool) -> User:

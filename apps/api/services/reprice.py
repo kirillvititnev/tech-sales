@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from apps.api.models.catalog import Product, StoreSettings
+from apps.api.models.account import UserNotification
 from apps.api.services.favorite_alerts import FavoriteWatch, notify_favorite_watchers, watches_for_update
 from apps.api.services.pricing import resolve_markup, storefront_price
 
@@ -70,7 +71,9 @@ def apply_quote(
     return cost, price, markup_dec, events
 
 
-async def reprice_synced_products(db: AsyncSession, settings: StoreSettings) -> int:
+async def reprice_synced_products(
+    db: AsyncSession, settings: StoreSettings
+) -> tuple[int, list[UserNotification]]:
     result = await db.execute(
         select(Product)
         .where(Product.is_manual.is_(False))
@@ -114,5 +117,5 @@ async def reprice_synced_products(db: AsyncSession, settings: StoreSettings) -> 
         product.markup_percent = markup_dec
         events.extend(watches)
         changed += 1
-    await notify_favorite_watchers(db, events)
-    return changed
+    notices = await notify_favorite_watchers(db, events)
+    return changed, notices

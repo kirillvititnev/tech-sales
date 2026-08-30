@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     default_markup_percent: float = 0.0
     price_round_to: int = 100
     parse_interval_minutes: int = 15
+    product_image_dir: str = "data/product-images"
 
     telegram_bot_token: str | None = None
     # One or more chat ids (user or group), comma-separated. Negative for groups.

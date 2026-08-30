@@ -227,8 +227,16 @@ export function AccountCabinet({
   catalogHref?: string;
   loginNext?: string;
 }) {
-  const { me, ready, loadOrders, loadFavorites, loadViews, loadNotifications, markNotificationRead } =
-    useAuth();
+  const {
+    me,
+    ready,
+    loadOrders,
+    loadFavorites,
+    loadViews,
+    loadNotifications,
+    markNotificationRead,
+    refreshUnread,
+  } = useAuth();
   const isMini = productBasePath.startsWith("/mini");
   const loginHref = isMini ? "/mini/account" : `/login?next=${encodeURIComponent(loginNext)}`;
   const registerHref = isMini ? "/mini/register" : `/register?next=${encodeURIComponent(loginNext)}`;
@@ -254,6 +262,7 @@ export function AccountCabinet({
         setFavorites(nextFav);
         setViews(nextViews);
         setNotes(nextNotes);
+        await refreshUnread();
       } catch {
         if (!cancelled) {
           setOrders([]);
@@ -266,7 +275,7 @@ export function AccountCabinet({
     return () => {
       cancelled = true;
     };
-  }, [me, loadOrders, loadFavorites, loadViews, loadNotifications]);
+  }, [me, loadOrders, loadFavorites, loadViews, loadNotifications, refreshUnread]);
 
   if (!ready) {
     return (
@@ -360,6 +369,9 @@ export function AccountCabinet({
 
         <div className="account-group">
           <h3>Уведомления</h3>
+          <p className="account-note">
+            Если входили через Telegram и написали боту магазина, те же уведомления приходят туда.
+          </p>
           {!notes?.length ? (
             <p className="account-note">Нет уведомлений.</p>
           ) : (

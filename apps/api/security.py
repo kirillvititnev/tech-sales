@@ -277,6 +277,10 @@ def rate_limit_rule(method: str, path: str) -> tuple[str, int, float] | None:
         and path.rstrip("/") != "/api/v1/me/orders"
     ):
         return ("me-order", 30, 60.0)
+    if method == "GET" and path.startswith("/api/v1/catalog/media/"):
+        return ("catalog-media", 600, 60.0)
+    if method == "POST" and path.startswith("/api/v1/admin/products/") and path.rstrip("/").endswith("/image"):
+        return ("admin-upload", 20, 60.0)
     if method == "GET" and path.rstrip("/") == "/api/v1/me/export":
         return ("me-export", 6, 60.0)
     if method == "POST" and path.rstrip("/") == "/api/v1/me/delete":

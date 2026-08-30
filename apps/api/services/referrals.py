@@ -48,16 +48,17 @@ async def ancestor_ids(db: AsyncSession, user_id: UUID, *, depth: int = 3) -> li
     return ids
 
 
-async def credit_paid_order(db: AsyncSession, order: Order, settings: StoreSettings) -> None:
+async def credit_paid_order(db: AsyncSession, order: Order, settings: StoreSettings) -> list[UserNotification]:
+    created: list[UserNotification] = []
     if order.user_id is None:
-        return
+        return created
     existing = await db.execute(
         select(BonusLedger.id)
         .where(BonusLedger.order_id == order.id, BonusLedger.level >= 1)
         .limit(1)
     )
     if existing.scalar_one_or_none() is not None:
-        return
+        return created
     percents = (
         settings.referral_percent_l1,
         settings.referral_percent_l2,
@@ -77,11 +78,12 @@ async def credit_paid_order(db: AsyncSession, order: Order, settings: StoreSetti
             )
         )
         user.bonus_balance = Decimal(str(user.bonus_balance)) + amount
-        db.add(
-            UserNotification(
-                user_id=user_id,
-                kind="bonus",
-                title="Начисление бонусов",
-                body=f"Уровень {level}: +{amount} ₽ за заказ {order.number}",
-            )
+        notice = UserNotification(
+            user_id=user_id,
+            kind="bonus",
+            title="Начисление бонусов",
+            body=f"Уровень {level}: +{amount} ₽ за заказ {order.number}",
         )
+        db.add(notice)
+        created.append(notice)
+    return created

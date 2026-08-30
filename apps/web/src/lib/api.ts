@@ -29,6 +29,16 @@ export type Product = {
   description?: string | null;
 };
 
+const MEDIA_PREFIX = "/api/v1/catalog/media/";
+
+export function productImageSrc(url: string | null | undefined): string | null {
+  if (!url || !url.startsWith(MEDIA_PREFIX)) return null;
+  const name = url.slice(MEDIA_PREFIX.length);
+  if (!/^[0-9a-f]{32}\.(jpg|png|webp)$/.test(name)) return null;
+  // Always same-origin so SSR and the browser match (Next rewrites `/api` → FastAPI).
+  return url;
+}
+
 export type Category = {
   id: string;
   slug: string;

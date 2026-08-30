@@ -24,8 +24,10 @@ from apps.api.models.catalog import (
     SupplierChannel,
 )
 from apps.api.services.admin_alerts import is_price_jump, notify_admin_ops
+from apps.api.services.customer_notify import customer_telegrams_for, deliver_customer_telegrams
 from apps.api.services.favorite_alerts import notify_favorite_watchers, watches_for_update
 from apps.api.services.pricing import resolve_markup, storefront_price
+from apps.api.services.product_images import message_photo_eligible, store_image
 from apps.worker.config import get_worker_settings
 from apps.worker.folders import get_folder_channels
 from apps.worker.offer_identity import OfferKind, classify_offer, min_price_for_kind
@@ -118,6 +120,7 @@ async def sync_folder(
         "rejected": 0,
         "errors": 0,
         "attachments": 0,
+        "photos": 0,
         "favorite_notices": 0,
     }
     parse_errors: list[tuple[str, str]] = []
@@ -174,6 +177,7 @@ async def sync_folder(
             display_meta: dict[str, dict] = {}
             synced_channel_ids: list = []
             favorite_events: list = []
+            photo_by_message: dict[str, str] = {}
 
             for fc in folder_channels:
                 channel: SupplierChannel | None = None
@@ -209,6 +213,7 @@ async def sync_folder(
                         stats["messages"] += 1
                         if doc is not None:
                             stats["attachments"] += 1
+                        publishable_here = 0
                         for text in blobs:
                             for line in parse_price_text(text):
                                 stats["lines"] += 1
@@ -220,6 +225,7 @@ async def sync_folder(
                                 if not identity.publish or not identity.identity_key:
                                     stats["rejected"] += 1
                                     continue
+                                publishable_here += 1
                                 floor = max(min_price, Decimal(min_price_for_kind(identity.kind)))
                                 if line.price < floor:
                                     stats["rejected"] += 1
@@ -287,6 +293,19 @@ async def sync_folder(
                                     offer.is_active = True
                                     offer.parsed_at = datetime.now(timezone.utc)
                                 stats["offers"] += 1
+
+                        if (
+                            getattr(msg, "photo", None) is not None
+                            and doc is None
+                            and message_photo_eligible(publishable_here)
+                        ):
+                            try:
+                                raw = await client.download_media(msg, file=bytes)
+                                if isinstance(raw, (bytes, bytearray)):
+                                    photo_by_message[str(msg.id)] = store_image(bytes(raw))
+                                    stats["photos"] += 1
+                            except Exception:  # noqa: BLE001
+                                logger.info("Product photo skipped message=%s", msg.id)
 
                     if active_keys:
                         all_offers = await session.execute(
@@ -513,6 +532,13 @@ async def sync_folder(
                     )
 
                 seen_product_ids.add(product.id)
+                if not product.image_url:
+                    for offer in offer_list:
+                        mid = str(offer.source_message_id or "")
+                        url = photo_by_message.get(mid)
+                        if url:
+                            product.image_url = url
+                            break
                 for offer in offer_list:
                     offer.product_id = product.id
 
@@ -529,10 +555,18 @@ async def sync_folder(
                         product.is_published = False
 
             try:
-                stats["favorite_notices"] = await notify_favorite_watchers(session, favorite_events)
+                notices = await notify_favorite_watchers(session, favorite_events)
+                stats["favorite_notices"] = len(notices)
+                jobs = await customer_telegrams_for(session, notices)
             except Exception:  # noqa: BLE001
                 logger.exception("Favorite watch notices failed")
+                jobs = []
             await session.commit()
+            if jobs:
+                try:
+                    await deliver_customer_telegrams(jobs)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Customer telegram favorite notices failed")
 
     await _flush_alerts()
     logger.info("Sync done: %s", stats)

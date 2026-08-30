@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth";
 
 export function SiteHeader() {
   const pathname = usePathname() ?? "/";
-  const { me, ready } = useAuth();
+  const { me, ready, unreadCount } = useAuth();
   const accountCurrent =
     pathname.startsWith("/account") || pathname.startsWith("/login") || pathname.startsWith("/register");
 
@@ -31,8 +31,17 @@ export function SiteHeader() {
         </Link>
         <CartNavLink href="/cart" />
         {ready && me ? (
-          <Link href="/account" aria-current={accountCurrent ? "page" : undefined}>
-            Кабинет
+          <Link
+            href="/account"
+            aria-current={accountCurrent ? "page" : undefined}
+            aria-label={unreadCount > 0 ? `Кабинет, непрочитанных ${unreadCount}` : "Кабинет"}
+          >
+            <span>Кабинет</span>
+            {unreadCount > 0 ? (
+              <span className="nav-count" aria-hidden="true">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            ) : null}
           </Link>
         ) : (
           <Link href="/login" aria-current={accountCurrent ? "page" : undefined}>

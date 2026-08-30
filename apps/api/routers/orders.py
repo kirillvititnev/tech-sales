@@ -18,6 +18,7 @@ from apps.api.models.user import User
 from apps.api.schemas.order import OrderCreate, OrderOut
 from apps.api.security import new_order_access_token, verify_telegram_init_data
 from apps.api.services.bonuses import apply_checkout_spend, resolve_bonus_spend
+from apps.api.services.customer_notify import customer_telegrams_for, deliver_customer_telegrams
 from apps.api.services.order_notify import build_admin_order_message, deliver_admin_order_text
 from apps.api.services.orders import validate_contacts, validate_delivery
 from apps.api.services.referrals import round_money
@@ -151,11 +152,13 @@ async def create_order(
     )
     db.add(order)
     await db.flush()
+    spend_notice = None
     if spend > 0 and user is not None:
         try:
-            await apply_checkout_spend(db, user, order, spend)
+            spend_notice = await apply_checkout_spend(db, user, order, spend)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    jobs = await customer_telegrams_for(db, [spend_notice] if spend_notice else [])
     await db.commit()
 
     loaded = await db.execute(_load_order_query().where(Order.id == order.id))
@@ -165,6 +168,8 @@ async def create_order(
         background_tasks.add_task(deliver_admin_order_text, notice)
     except Exception:
         logger.exception("Failed to build admin order notice for %s", saved.number)
+    if jobs:
+        background_tasks.add_task(deliver_customer_telegrams, jobs)
     return _public_order(saved, include_access=True)
 
 

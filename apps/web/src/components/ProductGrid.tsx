@@ -12,7 +12,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { AddToCartButton } from "@/components/AddToCartButton";
-import { formatPrice, type Product } from "@/lib/api";
+import { formatPrice, productImageSrc, type Product } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 export function formatDeviceCategory(category: string) {
@@ -111,6 +111,7 @@ export function ProductGrid({
         {products.map((p) => {
           const { brand, category, name, config } = catalogParts(p);
           const expanded = open?.id === p.id;
+          const photo = productImageSrc(p.image_url);
           return (
             <button
               key={p.id}
@@ -124,6 +125,10 @@ export function ProductGrid({
                 setOpen(p);
               }}
             >
+              {photo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="product-thumb" src={photo} alt="" />
+              ) : null}
               <span className="product-copy">
                 <span className="product-brand">{brand}</span>
                 {category ? <span className="product-category">{category}</span> : null}
@@ -303,6 +308,10 @@ function ProductSheet({
           {name}
         </p>
         {config ? <p className="product-config">{config}</p> : null}
+        {productImageSrc(product.image_url) ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className="product-sheet-photo" src={productImageSrc(product.image_url) ?? ""} alt={name} />
+        ) : null}
         <p className="product-sheet-note">{note}</p>
         <p className="product-sheet-price">
           <strong>{formatPrice(product.price)}</strong>

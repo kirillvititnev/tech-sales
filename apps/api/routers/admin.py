@@ -1,9 +1,9 @@
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import ValidationError
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -16,6 +16,7 @@ from apps.api.schemas.account import AdminBonusAdjust, AdminUserOut, AdminUserPa
 from apps.api.schemas.catalog import (
     AdminProductOut,
     AdminProductPatch,
+    AdminProductListOut,
     ChannelCreate,
     ChannelOut,
     ChannelStatusUpdate,
@@ -28,6 +29,11 @@ from apps.api.schemas.catalog import (
 from apps.api.schemas.order import AdminOrderAction, AdminOrderMessage, AdminOrderOut, AdminOrderStatusUpdate
 from apps.api.services.admin_catalog import get_or_create_store_settings, slugify_manual
 from apps.api.services.bonuses import apply_admin_bonus, set_user_active
+from apps.api.services.customer_notify import (
+    CustomerTelegram,
+    customer_telegrams_for,
+    deliver_customer_telegrams,
+)
 from apps.api.services.orders import (
     apply_admin_status,
     cancel_order,
@@ -35,12 +41,20 @@ from apps.api.services.orders import (
     manager_notice,
     mark_issued,
 )
+from apps.api.services.product_images import MAX_IMAGE_BYTES, delete_stored_image, store_image
 from apps.api.services.referrals import credit_paid_order
 from apps.api.services.reprice import reprice_synced_products
 
 from apps.api.security import escape_like, require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+
+
+def _enqueue_customer_telegrams(
+    background_tasks: BackgroundTasks, jobs: list[CustomerTelegram]
+) -> None:
+    if jobs:
+        background_tasks.add_task(deliver_customer_telegrams, jobs)
 
 
 def _orders_query():
@@ -83,7 +97,9 @@ async def get_settings(db: AsyncSession = Depends(get_db)) -> StoreSettingsOut:
 
 @router.patch("/settings", response_model=StoreSettingsOut)
 async def patch_settings(
-    payload: StoreSettingsUpdate, db: AsyncSession = Depends(get_db)
+    payload: StoreSettingsUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ) -> StoreSettingsOut:
     row = await get_or_create_store_settings(db)
     if payload.default_markup_percent is not None:
@@ -104,10 +120,13 @@ async def patch_settings(
     if payload.markup_rules is not None:
         row.markup_rules = _dump_markup_rules(payload.markup_rules)
         flag_modified(row, "markup_rules")
+    jobs: list[CustomerTelegram] = []
     if markup_changed:
-        await reprice_synced_products(db, row)
+        _, notices = await reprice_synced_products(db, row)
+        jobs = await customer_telegrams_for(db, notices)
     await db.commit()
     await db.refresh(row)
+    _enqueue_customer_telegrams(background_tasks, jobs)
     return _settings_out(row)
 
 
@@ -150,20 +169,33 @@ async def patch_channel_status(
     return channel
 
 
-@router.get("/products", response_model=list[AdminProductOut])
+@router.get("/products", response_model=AdminProductListOut)
 async def admin_list_products(
     q: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-) -> list[Product]:
+) -> AdminProductListOut:
     stmt = select(Product)
-    if q and q.strip():
-        term = f"%{escape_like(q.strip())}%"
-        stmt = stmt.where(Product.title.ilike(term, escape="\\"))
-    stmt = stmt.order_by(Product.updated_at.desc()).limit(limit).offset(offset)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+    count_stmt = select(func.count()).select_from(Product)
+    needle = (q or "").strip()
+    if needle:
+        term = f"%{escape_like(needle)}%"
+        match = or_(
+            Product.title.ilike(term, escape="\\"),
+            Product.brand.ilike(term, escape="\\"),
+            Product.slug.ilike(term, escape="\\"),
+        )
+        stmt = stmt.where(match)
+        count_stmt = count_stmt.where(match)
+    total = int((await db.execute(count_stmt)).scalar_one())
+    result = await db.execute(stmt.order_by(Product.updated_at.desc()).limit(limit).offset(offset))
+    return AdminProductListOut(
+        items=list(result.scalars().all()),
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/products", response_model=AdminProductOut, status_code=201)
@@ -209,6 +241,56 @@ async def patch_product(
         product.price = payload.price.quantize(Decimal("0.01"))
         if product.is_manual:
             product.cost_median = product.price
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+async def _admin_product(db: AsyncSession, product_id: UUID) -> Product:
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    return product
+
+
+@router.get("/products/{product_id}", response_model=AdminProductOut)
+async def get_admin_product(
+    product_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Product:
+    return await _admin_product(db, product_id)
+
+
+@router.post("/products/{product_id}/image", response_model=AdminProductOut)
+async def upload_product_image(
+    product_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> Product:
+    product = await _admin_product(db, product_id)
+    data = await file.read(MAX_IMAGE_BYTES + 1)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Слишком большой файл")
+    try:
+        url = store_image(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    delete_stored_image(product.image_url)
+    product.image_url = url
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+@router.delete("/products/{product_id}/image", response_model=AdminProductOut)
+async def delete_product_image(
+    product_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Product:
+    product = await _admin_product(db, product_id)
+    delete_stored_image(product.image_url)
+    product.image_url = None
     await db.commit()
     await db.refresh(product)
     return product
@@ -269,6 +351,7 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)) ->
 async def update_admin_status(
     order_id: UUID,
     payload: AdminOrderStatusUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> Order:
     result = await db.execute(_orders_query().where(Order.id == order_id))
@@ -289,9 +372,10 @@ async def update_admin_status(
 
     order.admin_status = admin_status
     order.customer_status = customer_status
+    notices = []
     if customer_status == CustomerOrderStatus.paid and previous != CustomerOrderStatus.paid:
         settings_row = await get_or_create_store_settings(db)
-        await credit_paid_order(db, order, settings_row)
+        notices.extend(await credit_paid_order(db, order, settings_row))
     notice = customer_status_notice(
         user_id=order.user_id,
         number=order.number,
@@ -300,7 +384,10 @@ async def update_admin_status(
     )
     if notice:
         db.add(notice)
+        notices.append(notice)
+    jobs = await customer_telegrams_for(db, notices)
     await db.commit()
+    _enqueue_customer_telegrams(background_tasks, jobs)
 
     loaded = await db.execute(_orders_query().where(Order.id == order.id))
     return loaded.scalar_one()
@@ -310,6 +397,7 @@ async def update_admin_status(
 async def order_action(
     order_id: UUID,
     payload: AdminOrderAction,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> Order:
     result = await db.execute(_orders_query().where(Order.id == order_id))
@@ -334,9 +422,12 @@ async def order_action(
         previous=previous,
         new_status=order.customer_status,
     )
+    jobs: list[CustomerTelegram] = []
     if notice:
         db.add(notice)
+        jobs = await customer_telegrams_for(db, [notice])
     await db.commit()
+    _enqueue_customer_telegrams(background_tasks, jobs)
     loaded = await db.execute(_orders_query().where(Order.id == order.id))
     return loaded.scalar_one()
 
@@ -345,6 +436,7 @@ async def order_action(
 async def order_message(
     order_id: UUID,
     payload: AdminOrderMessage,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> Order:
     result = await db.execute(_orders_query().where(Order.id == order_id))
@@ -358,7 +450,9 @@ async def order_message(
             detail="У заказа нет кабинета — напишите клиенту напрямую",
         )
     db.add(notice)
+    jobs = await customer_telegrams_for(db, [notice])
     await db.commit()
+    _enqueue_customer_telegrams(background_tasks, jobs)
     loaded = await db.execute(_orders_query().where(Order.id == order.id))
     return loaded.scalar_one()
 
@@ -413,15 +507,18 @@ async def patch_user(
 async def adjust_user_bonus(
     user_id: UUID,
     payload: AdminBonusAdjust,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> User:
     user = await _get_user(db, user_id)
     try:
-        await apply_admin_bonus(db, user, delta=payload.delta, note=payload.note)
+        user, notice = await apply_admin_bonus(db, user, delta=payload.delta, note=payload.note)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    jobs = await customer_telegrams_for(db, [notice])
     await db.commit()
     await db.refresh(user)
+    _enqueue_customer_telegrams(background_tasks, jobs)
     return user
 
 
@@ -475,13 +572,16 @@ async def patch_user(
 async def adjust_user_bonus(
     user_id: UUID,
     payload: AdminBonusAdjust,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> User:
     user = await _get_user(db, user_id)
     try:
-        await apply_admin_bonus(db, user, delta=payload.delta, note=payload.note)
+        user, notice = await apply_admin_bonus(db, user, delta=payload.delta, note=payload.note)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    jobs = await customer_telegrams_for(db, [notice])
     await db.commit()
     await db.refresh(user)
+    _enqueue_customer_telegrams(background_tasks, jobs)
     return user

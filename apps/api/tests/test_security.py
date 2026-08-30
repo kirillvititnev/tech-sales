@@ -78,6 +78,8 @@ def test_rate_limit_rules() -> None:
     assert rate_limit_rule("GET", "/api/v1/me/orders/WS-1")[0] == "me-order"
     assert rate_limit_rule("GET", "/api/v1/me/orders")[0] == "global"
     assert rate_limit_rule("GET", "/api/v1/admin/orders")[0] == "admin"
+    assert rate_limit_rule("GET", "/api/v1/catalog/media/aabb.jpg")[0] == "catalog-media"
+    assert rate_limit_rule("POST", "/api/v1/admin/products/11111111-1111-1111-1111-111111111111/image")[0] == "admin-upload"
 
 
 def test_weak_secret_denylist() -> None:

@@ -143,6 +143,10 @@ class NotificationOut(BaseModel):
     created_at: datetime
 
 
+class UnreadNotificationsOut(BaseModel):
+    unread: int = Field(ge=0)
+
+
 class BonusExportOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

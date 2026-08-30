@@ -2,6 +2,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,10 +17,29 @@ from apps.api.schemas.catalog import (
     SuggestItemOut,
 )
 from apps.api.security import escape_like, public_product_attributes
+from apps.api.services.product_images import media_type_for, resolve_image_file
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 CATALOG_ID_LOOKUP_LIMIT = 50
+
+
+@router.get("/media/{name}")
+async def catalog_media(name: str) -> FileResponse:
+    try:
+        path = resolve_image_file(name)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Фото не найдено") from None
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Фото не найдено")
+    return FileResponse(
+        path,
+        media_type=media_type_for(name),
+        headers={
+            "Cache-Control": "public, max-age=604800, immutable",
+            "Content-Disposition": "inline",
+        },
+    )
 
 SORT_OPTIONS = {
     "relevance",

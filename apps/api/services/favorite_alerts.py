@@ -96,9 +96,9 @@ def build_favorite_notices(
     return notices
 
 
-async def notify_favorite_watchers(session: AsyncSession, events: list[FavoriteWatch]) -> int:
+async def notify_favorite_watchers(session: AsyncSession, events: list[FavoriteWatch]) -> list[UserNotification]:
     if not events:
-        return 0
+        return []
     product_ids = {event.product_id for event in events}
     result = await session.execute(
         select(Favorite.user_id, Favorite.product_id).where(Favorite.product_id.in_(product_ids))
@@ -109,4 +109,4 @@ async def notify_favorite_watchers(session: AsyncSession, events: list[FavoriteW
     notices = build_favorite_notices(events, watchers)
     for notice in notices:
         session.add(notice)
-    return len(notices)
+    return notices

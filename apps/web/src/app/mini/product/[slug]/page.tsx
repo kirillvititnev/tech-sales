@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AddToCartButton } from "@/components/AddToCartButton";
-import { api, formatPrice } from "@/lib/api";
+import { api, formatPrice, productImageSrc } from "@/lib/api";
 
 export default async function MiniProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -25,6 +25,14 @@ export default async function MiniProductPage({ params }: { params: Promise<{ sl
       {category ? <p className="product-category">{category}</p> : null}
       <h2 style={{ marginTop: "0.35rem" }}>{name}</h2>
       {config ? <p className="product-config" style={{ marginTop: "0.5rem" }}>{config}</p> : null}
+      {productImageSrc(product.image_url) ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className="product-sheet-photo"
+          src={productImageSrc(product.image_url) ?? ""}
+          alt={name}
+        />
+      ) : null}
       <p className="lead">{product.description ?? "Менеджер подтвердит заказ и оплату лично."}</p>
       <p style={{ fontSize: "1.8rem", margin: "0 0 1.5rem" }}>
         <strong>{formatPrice(product.price)}</strong>

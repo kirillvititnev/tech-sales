@@ -7,6 +7,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.security import public_product_attributes
+from apps.api.services.product_images import is_storefront_image_url
+
+
+def _storefront_image(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    text = str(value)
+    return text if is_storefront_image_url(text) else None
 
 
 class CategoryOut(BaseModel):
@@ -30,6 +38,11 @@ class ProductOut(BaseModel):
     is_hot: bool
     image_url: str | None
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def only_local_image(cls, value: Any) -> str | None:
+        return _storefront_image(value)
 
     @field_validator("attributes", mode="before")
     @classmethod
@@ -86,6 +99,18 @@ class AdminProductOut(BaseModel):
     is_manual: bool
     image_url: str | None = None
     updated_at: datetime
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def only_local_image(cls, value: Any) -> str | None:
+        return _storefront_image(value)
+
+
+class AdminProductListOut(BaseModel):
+    items: list[AdminProductOut]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1)
+    offset: int = Field(ge=0)
 
 
 class AdminProductPatch(BaseModel):
