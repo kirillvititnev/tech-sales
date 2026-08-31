@@ -96,6 +96,35 @@ def test_outlier_does_not_move_median() -> None:
     assert quote.price == Decimal("100000")
 
 
+def test_receipt_includes_price_and_channel() -> None:
+    from apps.api.services.pricing import SupplierBid, quote_storefront, receipt_payload
+
+    quote = quote_storefront(
+        [
+            SupplierBid(Decimal("100000"), "Big Sale"),
+            SupplierBid(Decimal("101000"), "TECHNOV"),
+            SupplierBid(Decimal("99000"), "Unisale"),
+            SupplierBid(Decimal("999000"), "Spam Channel"),
+        ],
+        markup_percent=5,
+        round_to=100,
+    )
+    receipt = receipt_payload(quote, markup_percent=5, round_to=100)
+    assert receipt["accepted_n"] == 3
+    assert receipt["quarantined_n"] == 1
+    assert "100000.00 · Big Sale" in receipt["accepted"]
+    assert "101000.00 · TECHNOV" in receipt["accepted"]
+    assert "99000.00 · Unisale" in receipt["accepted"]
+    assert any("999000.00 · Spam Channel" in line and "outlier" in line for line in receipt["quarantined"])
+    # Bare prices still work (channel unknown)
+    bare = receipt_payload(
+        quote_storefront([100000, 101000, 99000], markup_percent=0, round_to=100),
+        0,
+        100,
+    )
+    assert bare["accepted"] == ["100000.00 · ?", "101000.00 · ?", "99000.00 · ?"]
+
+
 def test_two_prices_skip_quarantine() -> None:
     from apps.api.services.pricing import quarantine_outliers
 
@@ -126,7 +155,8 @@ def test_admin_product_out_maps_receipt() -> None:
             "price_receipt": {
                 "accepted_n": 3,
                 "quarantined_n": 1,
-                "quarantined": ["999000.00 (outlier)"],
+                "accepted": ["100000.00 · Big Sale", "101000.00 · TECHNOV", "99000.00 · Unisale"],
+                "quarantined": ["999000.00 · Spam (outlier)"],
                 "markup_percent": 0,
                 "round_to": 100,
             }
@@ -135,4 +165,5 @@ def test_admin_product_out_maps_receipt() -> None:
     out = admin_product_out(product)
     assert out.price_receipt is not None
     assert out.price_receipt.accepted_n == 3
-    assert out.price_receipt.quarantined == ["999000.00 (outlier)"]
+    assert out.price_receipt.accepted[0] == "100000.00 · Big Sale"
+    assert out.price_receipt.quarantined == ["999000.00 · Spam (outlier)"]

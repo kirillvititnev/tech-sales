@@ -14,6 +14,7 @@ from apps.api.models.catalog import Product, ProductOffer, StoreSettings
 from apps.api.models.account import UserNotification
 from apps.api.services.favorite_alerts import FavoriteWatch, notify_favorite_watchers, watches_for_update
 from apps.api.services.pricing import (
+    SupplierBid,
     quote_storefront,
     receipt_payload,
     resolve_markup,
@@ -94,7 +95,10 @@ async def reprice_synced_products(
     events: list[FavoriteWatch] = []
     for product in products:
         prices = [
-            Decimal(str(offer.raw_price))
+            SupplierBid(
+                Decimal(str(offer.raw_price)),
+                (offer.channel.title if offer.channel is not None else "") or "?",
+            )
             for offer in product.offers
             if offer.is_active
             and (offer.channel is None or bool(getattr(offer.channel, "counts_toward_price", True)))

@@ -21,6 +21,7 @@ type AdminProduct = {
   price_receipt: {
     accepted_n: number;
     quarantined_n: number;
+    accepted?: string[];
     quarantined: string[];
     markup_percent?: number | null;
     round_to?: number | null;
@@ -185,10 +186,17 @@ export default function AdminProductPage() {
                     ? ` · отброшено ${product.price_receipt.quarantined_n}`
                     : ""}
                 </p>
+                {(product.price_receipt.accepted?.length ?? 0) > 0 ? (
+                  <ul className="account-list">
+                    {product.price_receipt.accepted!.map((item) => (
+                      <li key={`a-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : null}
                 {product.price_receipt.quarantined.length > 0 ? (
                   <ul className="account-list">
                     {product.price_receipt.quarantined.map((item) => (
-                      <li key={item}>{item}</li>
+                      <li key={`q-${item}`}>{item}</li>
                     ))}
                   </ul>
                 ) : null}

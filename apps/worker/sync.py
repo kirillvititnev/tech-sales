@@ -28,16 +28,17 @@ from apps.api.services.admin_alerts import is_price_jump, notify_admin_ops
 from apps.api.services.customer_notify import customer_telegrams_for, deliver_customer_telegrams
 from apps.api.services.favorite_alerts import notify_favorite_watchers, watches_for_update
 from apps.api.services.pricing import (
+    SupplierBid,
     quote_storefront,
     receipt_payload,
     resolve_markup,
     with_price_receipt,
 )
-from apps.api.services.product_images import message_photo_eligible, store_image
 from apps.worker.config import get_worker_settings
 from apps.worker.folders import get_folder_channels
 from apps.worker.offer_identity import OfferKind, classify_offer, min_price_for_kind
 from apps.worker.parser import normalize_title, parse_price_text
+from apps.worker.reject_stats import note_reject, sync_stats_for_store
 from apps.worker.tg import make_telegram_client
 from apps.worker.attachments import message_price_texts
 
@@ -141,6 +142,8 @@ async def sync_folder(
         "photos": 0,
         "favorite_notices": 0,
         "quarantined": 0,
+        "reject_reasons": {},
+        "reject_samples": {},
     }
     parse_errors: list[tuple[str, str]] = []
     price_jumps: list[tuple[str, Decimal, Decimal]] = []
@@ -196,8 +199,8 @@ async def sync_folder(
             display_meta: dict[str, dict] = {}
             synced_channel_ids: list = []
             favorite_events: list = []
-            photo_by_message: dict[str, str] = {}
             channel_counts_price: dict[uuid.UUID, bool] = {}
+            channel_title_by_id: dict[uuid.UUID, str] = {}
 
             for fc in folder_channels:
                 channel: SupplierChannel | None = None
@@ -212,6 +215,7 @@ async def sync_folder(
                     )
                     synced_channel_ids.append(channel.id)
                     channel_counts_price[channel.id] = bool(getattr(channel, "counts_toward_price", True))
+                    channel_title_by_id[channel.id] = channel.title or fc.title or "?"
                     stats["channels"] += 1
 
                     entity = await client.get_entity(
@@ -234,22 +238,32 @@ async def sync_folder(
                         stats["messages"] += 1
                         if doc is not None:
                             stats["attachments"] += 1
-                        publishable_here = 0
                         for text in blobs:
                             for line in parse_price_text(text):
                                 stats["lines"] += 1
                                 if line.price < min_price:
-                                    stats["rejected"] += 1
+                                    note_reject(
+                                        stats,
+                                        "below_min_price",
+                                        title=line.title,
+                                    )
                                     continue
                                 identity = classify_offer(line.title, section=line.section)
                                 # title already has careful section glue from parser
                                 if not identity.publish or not identity.identity_key:
-                                    stats["rejected"] += 1
+                                    note_reject(
+                                        stats,
+                                        identity.reject_reason or "unpublished_identity",
+                                        title=line.title,
+                                    )
                                     continue
-                                publishable_here += 1
                                 floor = max(min_price, Decimal(min_price_for_kind(identity.kind)))
                                 if line.price < floor:
-                                    stats["rejected"] += 1
+                                    note_reject(
+                                        stats,
+                                        f"below_kind_floor:{identity.kind.value}",
+                                        title=line.title,
+                                    )
                                     continue
 
                                 ext = external_key(line.title, msg.id)
@@ -314,19 +328,6 @@ async def sync_folder(
                                     offer.is_active = True
                                     offer.parsed_at = datetime.now(timezone.utc)
                                 stats["offers"] += 1
-
-                        if (
-                            getattr(msg, "photo", None) is not None
-                            and doc is None
-                            and message_photo_eligible(publishable_here)
-                        ):
-                            try:
-                                raw = await client.download_media(msg, file=bytes)
-                                if isinstance(raw, (bytes, bytearray)):
-                                    photo_by_message[str(msg.id)] = store_image(bytes(raw))
-                                    stats["photos"] += 1
-                            except Exception:  # noqa: BLE001
-                                logger.info("Product photo skipped message=%s", msg.id)
 
                     if active_keys:
                         all_offers = await session.execute(
@@ -448,6 +449,7 @@ async def sync_folder(
                 OfferKind.camera.value,
             }
             seen_product_ids: set[uuid.UUID] = set()
+            skip_group_reasons: dict[str, int] = stats.setdefault("skip_group_reasons", {})
             for key, offer_list in by_key.items():
                 if not key:
                     continue
@@ -456,19 +458,36 @@ async def sync_folder(
                 kind = meta.get("kind")
                 brand = meta.get("brand") or None
                 if not title or kind not in publish_kinds or not brand:
+                    reason = (
+                        "missing_title"
+                        if not title
+                        else "kind_not_published"
+                        if kind not in publish_kinds
+                        else "missing_brand"
+                    )
+                    skip_group_reasons[reason] = int(skip_group_reasons.get(reason, 0)) + 1
                     continue
                 try:
                     kind_enum = OfferKind(kind)
                 except ValueError:
+                    skip_group_reasons["bad_kind"] = int(skip_group_reasons.get("bad_kind", 0)) + 1
                     continue
                 floor = Decimal(max(int(min_price), min_price_for_kind(kind_enum)))
                 prices = [
-                    Decimal(o.raw_price)
+                    SupplierBid(
+                        Decimal(o.raw_price),
+                        channel_title_by_id.get(o.channel_id)
+                        or (o.channel.title if getattr(o, "channel", None) else None)
+                        or "?",
+                    )
                     for o in offer_list
                     if Decimal(o.raw_price) >= floor
                     and channel_counts_price.get(o.channel_id, True)
                 ]
                 if not prices:
+                    skip_group_reasons["no_priced_offers"] = int(
+                        skip_group_reasons.get("no_priced_offers", 0)
+                    ) + 1
                     continue
                 markup_pct = resolve_markup(
                     markup,
@@ -480,6 +499,9 @@ async def sync_folder(
                 quote = quote_storefront(prices, markup_percent=markup_pct, round_to=round_to)
                 cost, price = quote.cost_median, quote.price
                 if cost is None or price is None or cost < floor:
+                    skip_group_reasons["quote_failed"] = int(
+                        skip_group_reasons.get("quote_failed", 0)
+                    ) + 1
                     continue
                 stats["quarantined"] += len(quote.quarantined)
                 receipt = receipt_payload(quote, markup_pct, round_to)
@@ -563,13 +585,6 @@ async def sync_folder(
                     )
 
                 seen_product_ids.add(product.id)
-                if not product.image_url:
-                    for offer in offer_list:
-                        mid = str(offer.source_message_id or "")
-                        url = photo_by_message.get(mid)
-                        if url:
-                            product.image_url = url
-                            break
                 for offer in offer_list:
                     offer.product_id = product.id
 
@@ -599,7 +614,7 @@ async def sync_folder(
                 store.last_sync_stats = {
                     "folder": folder_name,
                     "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-                    **{key: int(val) for key, val in stats.items()},
+                    **sync_stats_for_store(stats),
                 }
                 flag_modified(store, "last_sync_stats")
             except Exception:  # noqa: BLE001

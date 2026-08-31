@@ -61,6 +61,15 @@ def round_price(price: Decimal, round_to: int = 100) -> Decimal:
 _OUTLIER_Z = Decimal("3.5")
 _RELATIVE_CAP = Decimal("0.5")
 PRICE_RECEIPT_KEY = "price_receipt"
+_RECEIPT_LINE_CAP = 40
+
+
+@dataclass(frozen=True)
+class SupplierBid:
+    """One supplier price that may enter the storefront median."""
+
+    price: Decimal
+    channel: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,60 +78,110 @@ class StorefrontQuote:
     price: Decimal | None
     accepted: tuple[Decimal, ...]
     quarantined: tuple[tuple[Decimal, str], ...]
+    accepted_bids: tuple[SupplierBid, ...] = ()
+    quarantined_bids: tuple[tuple[SupplierBid, str], ...] = ()
+
+
+def _as_bid(item: SupplierBid | Decimal | float | int) -> SupplierBid:
+    if isinstance(item, SupplierBid):
+        price = Decimal(str(item.price)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return SupplierBid(price, (item.channel or "").strip())
+    price = Decimal(str(item)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return SupplierBid(price, "")
 
 
 def quarantine_outliers(
-    prices: list[Decimal | float | int],
+    prices: list[Decimal | float | int] | list[SupplierBid],
 ) -> tuple[list[Decimal], list[tuple[Decimal, str]]]:
-    """Drop statistical outliers. Keep the whole cohort if it would become empty."""
-    values = [Decimal(str(p)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) for p in prices]
-    if len(values) < 3:
-        return values, []
+    """Drop statistical outliers. Keep the whole cohort if it would become empty.
+
+    Accepts bare prices or SupplierBid; returns bare Decimal lists for callers
+    that only need the numbers (tests / storefront_price).
+    """
+    kept_bids, dropped_bids = quarantine_bids(prices)
+    return (
+        [b.price for b in kept_bids],
+        [(b.price, reason) for b, reason in dropped_bids],
+    )
+
+
+def quarantine_bids(
+    prices: list[Decimal | float | int] | list[SupplierBid],
+) -> tuple[list[SupplierBid], list[tuple[SupplierBid, str]]]:
+    """Drop statistical outliers while preserving channel labels."""
+    bids = [_as_bid(p) for p in prices]
+    if len(bids) < 3:
+        return bids, []
+    values = [b.price for b in bids]
     mid = compute_median_cost(values)
     if mid is None or mid <= 0:
-        return values, []
+        return bids, []
     deviations = [abs(v - mid) for v in values]
     mad = compute_median_cost(deviations) or Decimal("0")
-    kept: list[Decimal] = []
-    dropped: list[tuple[Decimal, str]] = []
-    for value in values:
+    kept: list[SupplierBid] = []
+    dropped: list[tuple[SupplierBid, str]] = []
+    for bid in bids:
         if mad == 0:
-            far = abs(value - mid) / mid > _RELATIVE_CAP
+            far = abs(bid.price - mid) / mid > _RELATIVE_CAP
         else:
-            z = (Decimal("0.6745") * abs(value - mid)) / mad
+            z = (Decimal("0.6745") * abs(bid.price - mid)) / mad
             far = z > _OUTLIER_Z
         if far:
-            dropped.append((value, "outlier"))
+            dropped.append((bid, "outlier"))
         else:
-            kept.append(value)
+            kept.append(bid)
     if not kept:
-        return values, []
+        return bids, []
     return kept, dropped
 
 
 def quote_storefront(
-    supplier_prices: list[Decimal | float | int],
+    supplier_prices: list[Decimal | float | int] | list[SupplierBid],
     markup_percent: float,
     round_to: int = 100,
 ) -> StorefrontQuote:
-    kept, dropped = quarantine_outliers(supplier_prices)
-    cost = compute_median_cost(kept)
+    kept_bids, dropped_bids = quarantine_bids(supplier_prices)
+    kept = tuple(b.price for b in kept_bids)
+    dropped = tuple((b.price, reason) for b, reason in dropped_bids)
+    cost = compute_median_cost(list(kept))
     if cost is None:
-        return StorefrontQuote(None, None, tuple(kept), tuple(dropped))
+        return StorefrontQuote(
+            None,
+            None,
+            kept,
+            dropped,
+            tuple(kept_bids),
+            tuple(dropped_bids),
+        )
     priced = apply_markup(cost, markup_percent)
     return StorefrontQuote(
         cost,
         round_price(priced, round_to),
-        tuple(kept),
-        tuple(dropped),
+        kept,
+        dropped,
+        tuple(kept_bids),
+        tuple(dropped_bids),
     )
 
 
+def _fmt_bid_line(bid: SupplierBid) -> str:
+    channel = bid.channel or "?"
+    return f"{bid.price} · {channel}"
+
+
 def receipt_payload(quote: StorefrontQuote, markup_percent: float, round_to: int) -> dict:
+    accepted_bids = quote.accepted_bids or tuple(SupplierBid(p, "") for p in quote.accepted)
+    quarantined_bids = quote.quarantined_bids or tuple(
+        (SupplierBid(price, ""), reason) for price, reason in quote.quarantined
+    )
     return {
-        "accepted_n": len(quote.accepted),
-        "quarantined_n": len(quote.quarantined),
-        "quarantined": [f"{price} ({reason})" for price, reason in quote.quarantined[:20]],
+        "accepted_n": len(accepted_bids),
+        "quarantined_n": len(quarantined_bids),
+        "accepted": [_fmt_bid_line(b) for b in accepted_bids[:_RECEIPT_LINE_CAP]],
+        "quarantined": [
+            f"{_fmt_bid_line(bid)} ({reason})"
+            for bid, reason in quarantined_bids[:_RECEIPT_LINE_CAP]
+        ],
         "markup_percent": markup_percent,
         "round_to": round_to,
     }
@@ -135,7 +194,7 @@ def with_price_receipt(attrs: dict | None, receipt: dict) -> dict:
 
 
 def storefront_price(
-    supplier_prices: list[Decimal | float | int],
+    supplier_prices: list[Decimal | float | int] | list[SupplierBid],
     markup_percent: float,
     round_to: int = 100,
 ) -> tuple[Decimal | None, Decimal | None]:

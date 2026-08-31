@@ -91,7 +91,8 @@ class PriceReceiptOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
     accepted_n: int = Field(ge=0)
     quarantined_n: int = Field(ge=0)
-    quarantined: list[str] = Field(default_factory=list, max_length=20)
+    accepted: list[str] = Field(default_factory=list, max_length=40)
+    quarantined: list[str] = Field(default_factory=list, max_length=40)
     markup_percent: float | None = None
     round_to: int | None = None
 
