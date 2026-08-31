@@ -21,10 +21,7 @@ export default async function HomePage() {
     <main>
       <section className="hero">
         <h1 className="hero-brand">White Shop</h1>
-        <p>
-          Автоматическая витрина техники: медиана предложений поставщиков и наценка магазина.
-          Москва — самовывоз, регионы — СДЭК.
-        </p>
+        <p>Москва — самовывоз, регионы — СДЭК.</p>
         <div className="cta-row">
           <Link href="/catalog" className="btn btn-primary">
             Смотреть каталог
@@ -37,14 +34,11 @@ export default async function HomePage() {
 
       <section id="catalog" className="section">
         <h2>Каталог</h2>
-        <p className="lead">
-          {apiUp
-            ? "Поиск, категории, фильтры и сортировка."
-            : "API пока недоступен — запустите `make up` и `make api`."}
-        </p>
-        {apiUp ? (
+        {!apiUp ? (
+          <p className="lead">API пока недоступен — запустите `make up` и `make api`.</p>
+        ) : (
           <CatalogBrowser initialProducts={products} initialFacets={facets} />
-        ) : null}
+        )}
       </section>
     </main>
   );

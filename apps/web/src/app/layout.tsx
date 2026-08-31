@@ -17,7 +17,7 @@ const display = Oswald({
 
 export const metadata: Metadata = {
   title: "White Shop",
-  description: "Техника с умной витриной цен",
+  description: "White Shop — техника",
 };
 
 export const viewport: Viewport = {

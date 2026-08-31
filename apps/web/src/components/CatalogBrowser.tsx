@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   useEffect,
   useId,
@@ -22,10 +21,10 @@ import {
 
 const SORT_OPTIONS: { value: CatalogSort; label: string }[] = [
   { value: "relevance", label: "По умолчанию" },
-  { value: "price_asc", label: "Цена ↑" },
-  { value: "price_desc", label: "Цена ↓" },
   { value: "name_asc", label: "Название А–Я" },
   { value: "name_desc", label: "Название Я–А" },
+  { value: "price_asc", label: "Цена ↑" },
+  { value: "price_desc", label: "Цена ↓" },
   { value: "brand_asc", label: "Бренд" },
   { value: "newest", label: "Сначала новые" },
   { value: "hot", label: "Сначала HOT" },
@@ -404,13 +403,6 @@ export function CatalogBrowser({
             Показать ещё
           </button>
         </div>
-      ) : null}
-
-      {productBasePath === "/product" ? (
-        <p className="catalog-footnote">
-          Цены — медиана предложений поставщиков плюс наценка магазина.{" "}
-          <Link href="/hot">HOT</Link>
-        </p>
       ) : null}
     </div>
   );

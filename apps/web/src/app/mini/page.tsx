@@ -17,18 +17,15 @@ export default async function MiniHomePage() {
   return (
     <main className="section">
       <h2>Каталог</h2>
-      <p className="lead">
-        {apiUp
-          ? "Поиск и фильтры. Заказ подтвердит менеджер."
-          : "API недоступен. Запустите `make api`."}
-      </p>
-      {apiUp ? (
+      {!apiUp ? (
+        <p className="lead">API недоступен. Запустите `make api`.</p>
+      ) : (
         <CatalogBrowser
           initialProducts={products}
           initialFacets={facets}
           productBasePath="/mini/product"
         />
-      ) : null}
+      )}
     </main>
   );
 }

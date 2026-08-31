@@ -487,12 +487,6 @@ a.btn,
   padding: 1.25rem 0 0.5rem;
 }
 
-.catalog-footnote {
-  margin: 0.5rem 0 0;
-  color: var(--mute);
-  font-size: 0.85rem;
-}
-
 .product-grid {
   display: flex;
   flex-direction: column;

@@ -18,14 +18,11 @@ export default async function CatalogPage() {
   return (
     <main className="section">
       <h2>Каталог</h2>
-      <p className="lead">
-        {apiUp
-          ? "Поиск, категории и фильтры. Цены уже с наценкой магазина."
-          : "API пока недоступен — запустите `make up` и `make api`."}
-      </p>
-      {apiUp ? (
+      {!apiUp ? (
+        <p className="lead">API пока недоступен — запустите `make up` и `make api`.</p>
+      ) : (
         <CatalogBrowser initialProducts={products} initialFacets={facets} />
-      ) : null}
+      )}
     </main>
   );
 }
