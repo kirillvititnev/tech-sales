@@ -76,12 +76,15 @@ export default function AdminSettingsPage() {
     setL3(String(data.referral_percent_l3 ?? "1"));
     setSyncBlurb(formatSyncStats(data.last_sync_stats));
     setRules(
-      (data.markup_rules ?? []).map((rule) => ({
-        match: isMatch(rule.match ?? "") ? rule.match : "brand",
-        value: rule.value ?? "",
-        percent: String(rule.percent ?? "0"),
-        error: null,
-      })),
+      (data.markup_rules ?? []).map((rule) => {
+        const raw = rule.match ?? "";
+        return {
+          match: isMatch(raw) ? raw : "brand",
+          value: rule.value ?? "",
+          percent: String(rule.percent ?? "0"),
+          error: null,
+        };
+      }),
     );
   }
 
