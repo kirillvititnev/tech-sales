@@ -2954,6 +2954,29 @@ def is_airpods_spare_part(title: str) -> bool:
     return False
 
 
+def is_airpods_case_or_box(title: str) -> bool:
+    """Charging case / box sold separately from the earbuds set."""
+    if not re.search(r"(?i)\bairpods?\b", title):
+        return False
+    return bool(re.search(r"(?i)(?:кейс|\bcase\b|\bbox\b)", title))
+
+
+def parse_airpods_case(title: str) -> tuple[str, str, str, str] | None:
+    """Return (brand, category, device_name, model_key) for AirPods case/box SKUs."""
+    if not is_airpods_case_or_box(title):
+        return None
+    # Drop case markers so parse_airpods can resolve generation (Pro 3 / 4 ANC / …).
+    stripped = re.sub(r"(?i)(?:кейс|\bcase\b|\bbox\b|type[\s\-]?c|usb[\s\-]?c)", " ", title)
+    stripped = re.sub(r"[/|]+", " ", stripped)
+    stripped = re.sub(r"\s+", " ", stripped).strip()
+    base = parse_airpods(stripped)
+    if base is None:
+        return None
+    brand, _category, device_name, _model = base
+    case_name = f"{device_name} Case"
+    return brand, "Аксессуары", case_name, case_name.lower()
+
+
 def parse_airpods(title: str) -> tuple[str, str, str, str] | None:
     """Return (brand, category, device_name, model_key) or None.
 
@@ -3251,13 +3274,20 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
         or parse_airpods_max(title)
         or (parse_airpods_max(f"{section} {working}") if section else None)
     )
+    airpods_case = None
     airpods = None
     if not airpods_max:
-        airpods = (
-            parse_airpods(working)
-            or parse_airpods(title)
-            or (parse_airpods(f"{section} {working}") if section else None)
+        airpods_case = (
+            parse_airpods_case(working)
+            or parse_airpods_case(title)
+            or (parse_airpods_case(f"{section} {working}") if section else None)
         )
+        if not airpods_case:
+            airpods = (
+                parse_airpods(working)
+                or parse_airpods(title)
+                or (parse_airpods(f"{section} {working}") if section else None)
+            )
 
     extra = ""
     ring_model_code = ""
@@ -3569,6 +3599,13 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
         device_category = category_for_headphones(asis_tier_name=asis_kind)
         if max_color:
             color = max_color
+        storage = ""
+        ram = ""
+        sim = None
+    elif airpods_case:
+        kind = OfferKind.apple_other
+        brand, device_category, device_name, model = airpods_case
+        color = ""
         storage = ""
         ram = ""
         sim = None

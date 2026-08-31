@@ -305,6 +305,41 @@ def test_airpods_discount_and_spare_parts_rejected() -> None:
         assert ident.publish is False, title
 
 
+def test_airpods_case_box_is_separate_accessory_sku() -> None:
+    """Charging case / box must not glue into the full earbuds product card."""
+    buds = classify_offer("AirPods Pro 3")
+    assert buds.publish is True
+    assert buds.device_name == "AirPods Pro 3"
+    assert buds.device_category == "Наушники"
+
+    case_titles = (
+        "airpods pro 3 box",
+        "airpods pro 3 box/case",
+        "AirPods Pro 3 Type-c Кейс",
+        "AirPods Pro 3 USB-C Box",
+        "AirPods Pro 3 case",
+        "Кейс AirPods Pro 3",
+    )
+    case_keys: set[str] = set()
+    for title in case_titles:
+        ident = classify_offer(title)
+        assert ident.publish is True, title
+        assert ident.device_category == "Аксессуары", title
+        assert "Case" in ident.device_name, title
+        assert "Pro 3" in ident.device_name, title
+        assert ident.identity_key != buds.identity_key, title
+        case_keys.add(ident.identity_key)
+
+    # Same accessory line shares one identity (connector wording must not explode SKUs)
+    assert len(case_keys) == 1
+
+    pro2_case = classify_offer("AirPods Pro 2 USB-C Case")
+    assert pro2_case.publish is True
+    assert pro2_case.device_name == "AirPods Pro 2 Case"
+    assert pro2_case.identity_key != classify_offer("AirPods Pro 2").identity_key
+    assert pro2_case.identity_key != next(iter(case_keys))
+
+
 def test_apple_watch_requires_size_and_color() -> None:
     ok = classify_offer("AW S10 42mm Silver Sport Band")
     assert ok.publish is True
