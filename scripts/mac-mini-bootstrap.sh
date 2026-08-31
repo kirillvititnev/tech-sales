@@ -138,9 +138,14 @@ spec.loader.exec_module(mod)
 path = Path("${ROOT}") / ".env"
 text = path.read_text(encoding="utf-8")
 text = mod.set_key(text, "TELEGRAM_PROXY", "socks5://xray:1080")
+hosts = mod.get_key(text, "ALLOWED_HOSTS") or ""
+parts = [h.strip() for h in hosts.split(",") if h.strip()]
+if "api" not in parts:
+    parts.append("api")
+    text = mod.set_key(text, "ALLOWED_HOSTS", ",".join(parts))
 path.write_text(text, encoding="utf-8")
 path.chmod(0o600)
-print("TELEGRAM_PROXY set")
+print("TELEGRAM_PROXY set; ALLOWED_HOSTS includes api")
 PY
 
 # Harden remaining empty secrets without rotating live DB passwords from handoff

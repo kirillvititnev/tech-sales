@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     admin_username: str | None = None
     admin_password: str | None = None
     api_docs_enabled: bool = False
-    allowed_hosts: str = "localhost,127.0.0.1,testserver,whiteshop.tech,www.whiteshop.tech"
+    allowed_hosts: str = "localhost,127.0.0.1,testserver,whiteshop.tech,www.whiteshop.tech,api"
     # Extra hop-by-hop proxy names (comma-separated). Loopback and RFC1918 are always trusted.
     trusted_proxies: str = ""
 
