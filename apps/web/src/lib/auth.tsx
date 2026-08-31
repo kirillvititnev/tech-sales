@@ -17,17 +17,12 @@ import { ensureTelegramWebApp } from "@/lib/telegram";
 const TOKEN_KEY = "whiteshop.auth.v2";
 const LEGACY_TOKEN_KEY = "whiteshop.auth.v1";
 const REF_KEY = "whiteshop.ref.v1";
+const AUTH_CREDS: RequestInit = { cache: "no-store", credentials: "include" };
 
 type TokenResponse = {
   access_token: string;
-  refresh_token: string;
+  refresh_token?: string;
   expires_in?: number;
-};
-
-type StoredSession = {
-  access_token: string;
-  refresh_token: string;
-  expires_at: number;
 };
 
 export type Me = {
@@ -119,33 +114,48 @@ function captureReferral() {
   }
 }
 
-function readSession(): StoredSession | null {
-  if (typeof window === "undefined") return null;
+function forgetStoredTokens() {
+  if (typeof window === "undefined") return;
   try {
-    const raw = localStorage.getItem(TOKEN_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredSession;
-    if (!parsed.access_token || !parsed.refresh_token) return null;
-    return parsed;
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
   } catch {
-    return null;
+    // ignore
   }
 }
 
-function writeSession(data: TokenResponse): StoredSession {
-  const session: StoredSession = {
-    access_token: data.access_token,
-    refresh_token: data.refresh_token,
-    expires_at: Date.now() + Math.max(30, (data.expires_in ?? 900) - 20) * 1000,
-  };
-  localStorage.setItem(TOKEN_KEY, JSON.stringify(session));
-  localStorage.removeItem(LEGACY_TOKEN_KEY);
-  return session;
-}
+let inflightRefresh: Promise<TokenResponse | null> | null = null;
+let inflightRefreshHold: number | null = null;
 
-function clearStored() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(LEGACY_TOKEN_KEY);
+async function postRefresh(signal?: AbortSignal): Promise<TokenResponse | null> {
+  if (inflightRefresh) return inflightRefresh;
+  inflightRefresh = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
+        method: "POST",
+        ...AUTH_CREDS,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        signal,
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as TokenResponse;
+      return data.access_token ? data : null;
+    } catch {
+      return null;
+    }
+  })();
+  try {
+    return await inflightRefresh;
+  } finally {
+    if (inflightRefreshHold != null) window.clearTimeout(inflightRefreshHold);
+    // Strict Mode remounts immediately; a second POST would replay the just-rotated
+    // cookie and revoke every session.
+    inflightRefreshHold = window.setTimeout(() => {
+      inflightRefresh = null;
+      inflightRefreshHold = null;
+    }, 2000);
+  }
 }
 
 async function parseError(res: Response, fallback: string): Promise<string> {
@@ -160,14 +170,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [unreadCount, setUnreadCount] = useState(0);
   const tokenRef = useRef<string | null>(null);
-  const refreshRef = useRef<string | null>(null);
   const refreshLock = useRef<Promise<string | null> | null>(null);
   tokenRef.current = token;
 
   const clearSession = useCallback(() => {
-    clearStored();
+    forgetStoredTokens();
     tokenRef.current = null;
-    refreshRef.current = null;
     setToken(null);
     setMe(null);
     setFavoriteIds(new Set());
@@ -176,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchFavoriteIds = useCallback(async (access: string): Promise<Set<string>> => {
     const res = await fetch(`${API_URL}/api/v1/me/favorites`, {
-      cache: "no-store",
+      ...AUTH_CREDS,
       headers: { Authorization: `Bearer ${access}` },
     });
     if (!res.ok) return new Set();
@@ -186,7 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchMe = useCallback(async (access: string): Promise<Me> => {
     const res = await fetch(`${API_URL}/api/v1/me`, {
-      cache: "no-store",
+      ...AUTH_CREDS,
       headers: { Authorization: `Bearer ${access}` },
     });
     if (!res.ok) throw new Error(await parseError(res, "Не удалось загрузить профиль"));
@@ -195,7 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUnread = useCallback(async (access: string): Promise<number> => {
     const res = await fetch(`${API_URL}/api/v1/me/notifications/unread-count`, {
-      cache: "no-store",
+      ...AUTH_CREDS,
       headers: { Authorization: `Bearer ${access}` },
     });
     if (!res.ok) return 0;
@@ -205,87 +213,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const applySession = useCallback(
     async (data: TokenResponse) => {
-      const session = writeSession(data);
-      tokenRef.current = session.access_token;
-      refreshRef.current = session.refresh_token;
-      setToken(session.access_token);
-      const profile = await fetchMe(session.access_token);
+      forgetStoredTokens();
+      tokenRef.current = data.access_token;
+      setToken(data.access_token);
+      const profile = await fetchMe(data.access_token);
       setMe(profile);
-      setFavoriteIds(await fetchFavoriteIds(session.access_token));
-      setUnreadCount(await fetchUnread(session.access_token));
+      setFavoriteIds(await fetchFavoriteIds(data.access_token));
+      setUnreadCount(await fetchUnread(data.access_token));
     },
     [fetchFavoriteIds, fetchMe, fetchUnread],
   );
 
-  const refreshAccess = useCallback(async (): Promise<string | null> => {
-    if (refreshLock.current) return refreshLock.current;
-    const run = (async () => {
-      const session = readSession();
-      const refreshToken = session?.refresh_token ?? refreshRef.current;
-      if (!refreshToken) return null;
-      const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
-        method: "POST",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      if (!res.ok) {
-        clearSession();
-        return null;
+  const refreshAccess = useCallback(
+    async (signal?: AbortSignal): Promise<string | null> => {
+      if (refreshLock.current) return refreshLock.current;
+      const run = (async () => {
+        const data = await postRefresh(signal);
+        if (!data?.access_token) {
+          clearSession();
+          return null;
+        }
+        forgetStoredTokens();
+        tokenRef.current = data.access_token;
+        setToken(data.access_token);
+        return data.access_token;
+      })();
+      refreshLock.current = run;
+      try {
+        return await run;
+      } finally {
+        refreshLock.current = null;
       }
-      const data = (await res.json()) as TokenResponse;
-      const next = writeSession(data);
-      tokenRef.current = next.access_token;
-      refreshRef.current = next.refresh_token;
-      setToken(next.access_token);
-      return next.access_token;
-    })();
-    refreshLock.current = run;
-    try {
-      return await run;
-    } finally {
-      refreshLock.current = null;
-    }
-  }, [clearSession]);
+    },
+    [clearSession],
+  );
 
   useEffect(() => {
     let cancelled = false;
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => ac.abort(), 4000);
     (async () => {
       captureReferral();
-      localStorage.removeItem(LEGACY_TOKEN_KEY);
-      const stored = readSession();
-      if (!stored) {
-        if (!cancelled) setReady(true);
-        return;
-      }
-      refreshRef.current = stored.refresh_token;
+      forgetStoredTokens();
       try {
-        let access = stored.access_token;
-        if (stored.expires_at && stored.expires_at < Date.now()) {
-          const next = await refreshAccess();
-          if (!next) throw new Error("expired");
-          access = next;
-        }
-        const profile = await fetchMe(access).catch(async () => {
-          const next = await refreshAccess();
-          if (!next) throw new Error("expired");
-          return fetchMe(next);
-        });
-        const favs = await fetchFavoriteIds(tokenRef.current || access);
+        const access = await refreshAccess(ac.signal);
+        if (!access || cancelled) return;
+        const profile = await fetchMe(access);
+        const favs = await fetchFavoriteIds(access);
         if (cancelled) return;
-        tokenRef.current = tokenRef.current || access;
-        setToken(tokenRef.current);
         setMe(profile);
         setFavoriteIds(favs);
-        setUnreadCount(await fetchUnread(tokenRef.current));
+        setUnreadCount(await fetchUnread(access));
       } catch {
         clearSession();
       } finally {
-        if (!cancelled) setReady(true);
+        window.clearTimeout(timer);
+        setReady(true);
       }
     })();
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [clearSession, fetchFavoriteIds, fetchMe, fetchUnread, refreshAccess]);
 
@@ -299,6 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch(`${API_URL}/api/v1/auth/telegram`, {
           method: "POST",
+          ...AUTH_CREDS,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             init_data: initData,
@@ -308,7 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         if (!res.ok) return;
         const data = (await res.json()) as TokenResponse;
-        if (data.access_token && data.refresh_token && !cancelled) await applySession(data);
+        if (data.access_token && !cancelled) await applySession(data);
       } catch {
         // Stay a guest if Mini App HMAC is missing (browser QA).
       }
@@ -327,7 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (path: string, init?: RequestInit) => {
       const send = (access: string | null) =>
         fetch(`${API_URL}${path}`, {
-          cache: "no-store",
+          ...AUTH_CREDS,
           ...init,
           headers: {
             "Content-Type": "application/json",
@@ -363,6 +352,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const res = await fetch(`${API_URL}/api/v1/auth/login`, {
         method: "POST",
+        ...AUTH_CREDS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
@@ -382,6 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }) => {
       const res = await fetch(`${API_URL}/api/v1/auth/register`, {
         method: "POST",
+        ...AUTH_CREDS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...input, referral_code: storedReferral() }),
       });
@@ -395,6 +386,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (initData: string, privacyConsent = false) => {
       const res = await fetch(`${API_URL}/api/v1/auth/telegram`, {
         method: "POST",
+        ...AUTH_CREDS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           init_data: initData,
@@ -412,6 +404,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (user: TelegramWidgetUser, privacyConsent = false) => {
       const res = await fetch(`${API_URL}/api/v1/auth/telegram-login`, {
         method: "POST",
+        ...AUTH_CREDS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: String(user.id),
@@ -432,19 +425,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    const session = readSession();
     try {
       await fetch(`${API_URL}/api/v1/auth/logout`, {
         method: "POST",
-        cache: "no-store",
+        ...AUTH_CREDS,
         headers: {
           "Content-Type": "application/json",
           ...(tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {}),
         },
-        body: JSON.stringify(session?.refresh_token ? { refresh_token: session.refresh_token } : {}),
+        body: JSON.stringify({}),
       });
     } catch {
       // Local sign-out still proceeds.
+    }
+    inflightRefresh = null;
+    if (inflightRefreshHold != null) {
+      window.clearTimeout(inflightRefreshHold);
+      inflightRefreshHold = null;
     }
     clearSession();
   }, [clearSession]);

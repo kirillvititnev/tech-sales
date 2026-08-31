@@ -28,6 +28,11 @@ loadParentEnv();
 
 const apiInternal = (process.env.API_INTERNAL_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
+const isProd = process.env.NODE_ENV === "production";
+const scriptSrc = isProd
+  ? "script-src 'self' 'unsafe-inline' https://telegram.org https://*.telegram.org"
+  : "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org https://*.telegram.org";
+
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
@@ -38,9 +43,9 @@ const securityHeaders = [
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org https://*.telegram.org",
+      scriptSrc,
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
+      "img-src 'self' data: blob: https://telegram.org https://*.telegram.org https://t.me",
       "font-src 'self' data:",
       "connect-src 'self' https://telegram.org https://*.telegram.org",
       "frame-src 'self' https://oauth.telegram.org https://telegram.org https://*.telegram.org",
@@ -57,6 +62,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   allowedDevOrigins: ["whiteshop.tech", "www.whiteshop.tech"],
   agentRules: false,
+  devIndicators: false,
   images: {
     formats: ["image/webp"],
   },
@@ -64,10 +70,17 @@ const nextConfig: NextConfig = {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
   async rewrites() {
-    return [
-      { source: "/api/:path*", destination: `${apiInternal}/api/:path*` },
-      { source: "/health", destination: `${apiInternal}/health` },
-    ];
+    return {
+      beforeFiles: [
+        { source: "/__nextjs_launch-editor", destination: "/blocked-devtools" },
+        { source: "/__nextjs_launch-editor/:path*", destination: "/blocked-devtools" },
+        { source: "/__nextjs_original-stack-frames", destination: "/blocked-devtools" },
+      ],
+      afterFiles: [
+        { source: "/api/:path*", destination: `${apiInternal}/api/:path*` },
+        { source: "/health", destination: `${apiInternal}/health` },
+      ],
+    };
   },
 };
 

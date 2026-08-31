@@ -4,7 +4,8 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,11 @@ from apps.api.schemas.account import (
 )
 from apps.api.security import verify_telegram_init_data, verify_telegram_login_widget
 from apps.api.services.accounts import unique_referral_code
+from apps.api.services.auth_cookies import (
+    attach_refresh_cookie,
+    clear_refresh_cookie,
+    refresh_token_from_request,
+)
 from apps.api.services.passwords import dummy_verify, hash_password, password_error, verify_password
 from apps.api.services.sessions import (
     issue_session,
@@ -37,6 +43,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _TG_MAX_AGE = 60 * 60 * 36
 _AUTH_FAIL = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный email или пароль")
+_REGISTER_FAIL = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не удалось зарегистрироваться")
+
+
+def _token_response(request: Request, tokens: TokenOut, *, status_code: int = 200) -> JSONResponse:
+    response = JSONResponse(
+        content=tokens.model_dump(exclude={"refresh_token"}),
+        status_code=status_code,
+        headers={"Cache-Control": "no-store"},
+    )
+    attach_refresh_cookie(request, response, tokens.refresh_token)
+    return response
 
 
 async def _referrer_id(db: AsyncSession, code: str | None) -> UUID | None:
@@ -56,11 +73,12 @@ def _stamp_consent(user: User) -> None:
 
 
 @router.post("/register", response_model=TokenOut, status_code=201)
-async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
+async def register(payload: RegisterIn, request: Request, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     email = str(payload.email).strip().lower()
     taken = await db.execute(select(User.id).where(User.email == email))
     if taken.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail="Этот email уже зарегистрирован")
+        dummy_verify(payload.password)
+        raise _REGISTER_FAIL
     problem = password_error(payload.password, email=email)
     if problem:
         raise HTTPException(status_code=400, detail=problem)
@@ -76,11 +94,11 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)) -> T
     _stamp_consent(user)
     db.add(user)
     await db.flush()
-    return await issue_session(db, user)
+    return _token_response(request, await issue_session(db, user), status_code=201)
 
 
 @router.post("/login", response_model=TokenOut)
-async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
+async def login(payload: LoginIn, request: Request, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     email = str(payload.email).strip().lower()
     result = await db.execute(select(User).where(User.email == email, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
@@ -89,7 +107,7 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)) -> TokenOu
         raise _AUTH_FAIL
     if not verify_password(payload.password, user.password_hash):
         raise _AUTH_FAIL
-    return await issue_session(db, user)
+    return _token_response(request, await issue_session(db, user))
 
 
 async def _upsert_telegram_user(
@@ -124,7 +142,7 @@ async def _upsert_telegram_user(
 
 
 @router.post("/telegram", response_model=TokenOut)
-async def auth_telegram(payload: TelegramInitIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
+async def auth_telegram(payload: TelegramInitIn, request: Request, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     settings = get_settings()
     if not settings.telegram_bot_token:
         raise HTTPException(status_code=503, detail="Telegram-вход не настроен")
@@ -152,11 +170,11 @@ async def auth_telegram(payload: TelegramInitIn, db: AsyncSession = Depends(get_
         referral_code=payload.referral_code,
         privacy_consent=payload.privacy_consent,
     )
-    return await issue_session(db, user)
+    return _token_response(request, await issue_session(db, user))
 
 
 @router.post("/telegram-login", response_model=TokenOut)
-async def auth_telegram_login(payload: TelegramLoginIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
+async def auth_telegram_login(payload: TelegramLoginIn, request: Request, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     settings = get_settings()
     if not settings.telegram_bot_token:
         raise HTTPException(status_code=503, detail="Telegram-вход не настроен")
@@ -178,13 +196,16 @@ async def auth_telegram_login(payload: TelegramLoginIn, db: AsyncSession = Depen
         referral_code=payload.referral_code,
         privacy_consent=payload.privacy_consent,
     )
-    return await issue_session(db, user)
+    return _token_response(request, await issue_session(db, user))
 
 
 @router.post("/refresh", response_model=TokenOut)
-async def refresh_session(payload: RefreshIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
+async def refresh_session(request: Request, payload: RefreshIn | None = None, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     secret = get_settings().api_secret_key
-    claims = parse_refresh_claims(payload.refresh_token, secret)
+    raw = refresh_token_from_request(request, payload.refresh_token if payload else None)
+    if not raw:
+        raise HTTPException(status_code=401, detail="Нужен вход")
+    claims = parse_refresh_claims(raw, secret)
     if claims is None:
         raise HTTPException(status_code=401, detail="Нужен вход")
     row = await load_refresh_row(db, claims)
@@ -205,11 +226,12 @@ async def refresh_session(payload: RefreshIn, db: AsyncSession = Depends(get_db)
         or user.token_version != claims.token_version
     ):
         raise HTTPException(status_code=401, detail="Нужен вход")
-    return await rotate_refresh(db, user, row)
+    return _token_response(request, await rotate_refresh(db, user, row))
 
 
 @router.post("/logout", status_code=204)
 async def logout(
+    request: Request,
     payload: LogoutIn | None = None,
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(peek_user),
@@ -217,8 +239,9 @@ async def logout(
     body = payload or LogoutIn()
     secret = get_settings().api_secret_key
     target = user
-    if body.refresh_token:
-        claims = parse_refresh_claims(body.refresh_token, secret)
+    raw = refresh_token_from_request(request, body.refresh_token)
+    if raw:
+        claims = parse_refresh_claims(raw, secret)
         if claims is not None:
             row = await load_refresh_row(db, claims)
             if row and row.revoked_at is None:
@@ -229,4 +252,6 @@ async def logout(
     if target is not None:
         await revoke_all_sessions(db, target)
         await db.commit()
-    return Response(status_code=204)
+    response = Response(status_code=204)
+    clear_refresh_cookie(response)
+    return response

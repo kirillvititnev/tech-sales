@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     admin_password: str | None = None
     api_docs_enabled: bool = False
     allowed_hosts: str = "localhost,127.0.0.1,testserver,whiteshop.tech,www.whiteshop.tech"
+    # Extra hop-by-hop proxy names (comma-separated). Loopback and RFC1918 are always trusted.
+    trusted_proxies: str = ""
 
     # Temporary: storefront shows supplier median (no markup) until pricing strategy returns.
     default_markup_percent: float = 0.0
@@ -51,6 +53,10 @@ class Settings(BaseSettings):
     @property
     def allowed_host_list(self) -> list[str]:
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
+
+    @property
+    def trusted_proxy_list(self) -> list[str]:
+        return [h.strip() for h in self.trusted_proxies.split(",") if h.strip()]
 
     @property
     def admin_telegram_chat_ids(self) -> list[str]:

@@ -8,11 +8,18 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
-from apps.api.models.catalog import Product, StoreSettings
+from apps.api.models.catalog import Product, ProductOffer, StoreSettings
 from apps.api.models.account import UserNotification
 from apps.api.services.favorite_alerts import FavoriteWatch, notify_favorite_watchers, watches_for_update
-from apps.api.services.pricing import resolve_markup, storefront_price
+from apps.api.services.pricing import (
+    quote_storefront,
+    receipt_payload,
+    resolve_markup,
+    storefront_price,
+    with_price_receipt,
+)
 
 
 def synced_storefront_quote(
@@ -77,7 +84,7 @@ async def reprice_synced_products(
     result = await db.execute(
         select(Product)
         .where(Product.is_manual.is_(False))
-        .options(selectinload(Product.offers))
+        .options(selectinload(Product.offers).selectinload(ProductOffer.channel))
     )
     products = list(result.scalars().all())
     rules = list(settings.markup_rules or [])
@@ -90,24 +97,32 @@ async def reprice_synced_products(
             Decimal(str(offer.raw_price))
             for offer in product.offers
             if offer.is_active
+            and (offer.channel is None or bool(getattr(offer.channel, "counts_toward_price", True)))
         ]
-        quote = synced_storefront_quote(
+        attrs = product.attributes if isinstance(product.attributes, dict) else {}
+        kind = str(attrs.get("kind") or "") or None
+        category = str(attrs.get("device_category") or "") or None
+        markup_pct = resolve_markup(
+            default_markup,
+            rules,
             brand=product.brand,
-            attributes=product.attributes,
-            offer_prices=prices,
-            default_markup=default_markup,
-            rules=rules,
-            round_to=round_to,
+            category=category,
+            kind=kind,
         )
-        if quote is None:
+        quoted = quote_storefront(prices, markup_percent=markup_pct, round_to=round_to)
+        if quoted.cost_median is None or quoted.price is None:
             continue
+        product.attributes = with_price_receipt(
+            attrs, receipt_payload(quoted, markup_pct, round_to)
+        )
+        flag_modified(product, "attributes")
         applied = apply_quote(
             product_id=product.id,
             title=product.title,
             old_price=product.price,
             old_cost=product.cost_median,
             old_markup=product.markup_percent,
-            quote=quote,
+            quote=(quoted.cost_median, quoted.price, markup_pct),
         )
         if applied is None:
             continue

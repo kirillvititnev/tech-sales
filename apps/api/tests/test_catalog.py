@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from apps.api.routers.catalog import CATALOG_ID_LOOKUP_LIMIT, SORT_OPTIONS
+from apps.api.routers.catalog import CATALOG_ID_LOOKUP_LIMIT, CATALOG_LIST_LIMIT, SORT_OPTIONS
 from apps.api.schemas.catalog import ProductOut
 
 
@@ -15,6 +15,10 @@ def test_catalog_sort_options() -> None:
 
 def test_catalog_id_lookup_limit() -> None:
     assert CATALOG_ID_LOOKUP_LIMIT == 50
+
+
+def test_catalog_list_limit_capped() -> None:
+    assert CATALOG_LIST_LIMIT == 120
 
 
 def test_product_out_drops_remote_image_url() -> None:

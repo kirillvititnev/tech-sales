@@ -121,7 +121,7 @@ export type Order = {
 function buildCatalogParams(params?: CatalogQuery): URLSearchParams {
   const sp = new URLSearchParams();
   if (!params) {
-    sp.set("limit", "200");
+    sp.set("limit", "120");
     return sp;
   }
   if (params.ids?.length) {
@@ -138,7 +138,7 @@ function buildCatalogParams(params?: CatalogQuery): URLSearchParams {
   if (params.min_price != null) sp.set("min_price", String(params.min_price));
   if (params.max_price != null) sp.set("max_price", String(params.max_price));
   if (params.sort) sp.set("sort", params.sort);
-  sp.set("limit", String(params.limit ?? 200));
+  sp.set("limit", String(params.limit ?? 120));
   if (params.offset) sp.set("offset", String(params.offset));
   return sp;
 }
@@ -226,10 +226,11 @@ export const api = {
   product: (slug: string) => apiGet<Product>(`/api/v1/catalog/products/${slug}`),
   categories: () => apiGet<Category[]>("/api/v1/catalog/categories"),
   orderByNumber: (number: string, access: string) =>
-    apiGet<Order>(
-      `/api/v1/orders/by-number/${encodeURIComponent(number)}?access=${encodeURIComponent(access)}`,
-      { next: { revalidate: 0 }, cache: "no-store" },
-    ),
+    apiGet<Order>(`/api/v1/orders/by-number/${encodeURIComponent(number)}`, {
+      next: { revalidate: 0 },
+      cache: "no-store",
+      headers: { "X-Order-Access": access },
+    }),
   adminOrders: () =>
     apiGet<Order[]>("/api/v1/admin/orders", {
       next: { revalidate: 0 },

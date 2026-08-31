@@ -16,6 +16,11 @@ function unauthorized(): Response {
 }
 
 export function proxy(request: Request): Response | undefined {
+  const path = new URL(request.url).pathname;
+  if (path.startsWith("/__nextjs_")) {
+    return new Response("Not Found", { status: 404, headers: { "Cache-Control": "no-store" } });
+  }
+
   const user = process.env.ADMIN_USERNAME ?? "";
   const password = process.env.ADMIN_PASSWORD ?? "";
   if (!user || !password) {
@@ -42,5 +47,11 @@ export function proxy(request: Request): Response | undefined {
 }
 
 export const config = {
-  matcher: ["/admin", "/admin/:path*", "/api/v1/admin", "/api/v1/admin/:path*"],
+  matcher: [
+    "/admin",
+    "/admin/:path*",
+    "/api/v1/admin",
+    "/api/v1/admin/:path*",
+    "/__nextjs_:path*",
+  ],
 };

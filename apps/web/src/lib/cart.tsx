@@ -12,10 +12,13 @@ import {
 } from "react";
 
 import { api, type Product } from "@/lib/api";
+import { CartPriceSheet } from "@/components/CartPriceSheet";
 import {
+  acceptCartPending,
   livePriceNote,
   mergeLiveCart,
   type CartLine,
+  type CartPendingChange,
 } from "@/lib/cartPrices";
 
 export type { CartLine };
@@ -27,10 +30,13 @@ type CartContextValue = {
   ready: boolean;
   pricesSyncing: boolean;
   priceNote: string | null;
+  pricePending: CartPendingChange[];
   add: (line: Omit<CartLine, "quantity">, qty?: number) => void;
   setQty: (productId: string, quantity: number) => void;
   remove: (productId: string) => void;
   clear: () => void;
+  acceptPriceChanges: () => void;
+  removePending: (productId: string) => void;
 };
 
 const STORAGE_KEY = "whiteshop.cart.v1";
@@ -69,6 +75,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [pricesSyncing, setPricesSyncing] = useState(false);
   const [priceNote, setPriceNote] = useState<string | null>(null);
+  const [pricePending, setPricePending] = useState<CartPendingChange[]>([]);
   const linesRef = useRef<CartLine[]>([]);
   linesRef.current = lines;
 
@@ -94,6 +101,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     if (!ready) return;
     if (!idsKey) {
       setPriceNote(null);
+      setPricePending([]);
       setPricesSyncing(false);
       return;
     }
@@ -107,7 +115,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
         const result = mergeLiveCart(linesRef.current, live, ids);
         linesRef.current = result.next;
         setLines(result.next);
-        setPriceNote(livePriceNote(result.removed, result.changed));
+        setPricePending(result.pending);
+        setPriceNote(livePriceNote(result.droppedPrices));
       } catch {
         if (!cancelled) {
           setPriceNote("Не удалось сверить цены с витриной. Проверьте сеть перед заказом.");
@@ -136,19 +145,44 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setQty = useCallback((productId: string, quantity: number) => {
-    setLines((prev) => {
-      if (quantity <= 0) return prev.filter((l) => l.productId !== productId);
-      return prev.map((l) =>
-        l.productId === productId ? { ...l, quantity: Math.min(100, quantity) } : l,
-      );
-    });
+    if (quantity <= 0) {
+      setLines((prev) => prev.filter((l) => l.productId !== productId));
+      setPricePending((prev) => prev.filter((item) => item.productId !== productId));
+      return;
+    }
+    setLines((prev) =>
+      prev.map((l) => (l.productId === productId ? { ...l, quantity: Math.min(100, quantity) } : l)),
+    );
   }, []);
 
   const remove = useCallback((productId: string) => {
     setLines((prev) => prev.filter((l) => l.productId !== productId));
+    setPricePending((prev) => prev.filter((item) => item.productId !== productId));
   }, []);
 
-  const clear = useCallback(() => setLines([]), []);
+  const clear = useCallback(() => {
+    setLines([]);
+    setPricePending([]);
+    setPriceNote(null);
+  }, []);
+
+  const acceptPriceChanges = useCallback(() => {
+    setLines((prev) => {
+      const next = acceptCartPending(prev, pricePending);
+      linesRef.current = next;
+      return next;
+    });
+    setPricePending([]);
+  }, [pricePending]);
+
+  const removePending = useCallback((productId: string) => {
+    setLines((prev) => {
+      const next = prev.filter((line) => line.productId !== productId);
+      linesRef.current = next;
+      return next;
+    });
+    setPricePending((prev) => prev.filter((item) => item.productId !== productId));
+  }, []);
 
   const count = useMemo(() => lines.reduce((s, l) => s + l.quantity, 0), [lines]);
   const total = useMemo(
@@ -164,15 +198,41 @@ export function CartProvider({ children }: { children: ReactNode }) {
       ready,
       pricesSyncing,
       priceNote,
+      pricePending,
       add,
       setQty,
       remove,
       clear,
+      acceptPriceChanges,
+      removePending,
     }),
-    [lines, count, total, ready, pricesSyncing, priceNote, add, setQty, remove, clear],
+    [
+      lines,
+      count,
+      total,
+      ready,
+      pricesSyncing,
+      priceNote,
+      pricePending,
+      add,
+      setQty,
+      remove,
+      clear,
+      acceptPriceChanges,
+      removePending,
+    ],
   );
 
-  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+  return (
+    <CartContext.Provider value={value}>
+      {children}
+      <CartPriceSheet
+        pending={pricePending}
+        onAccept={acceptPriceChanges}
+        onRemove={removePending}
+      />
+    </CartContext.Provider>
+  );
 }
 
 export function useCart(): CartContextValue {

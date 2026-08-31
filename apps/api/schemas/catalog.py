@@ -4,9 +4,10 @@ from uuid import UUID
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from apps.api.security import public_product_attributes
+from apps.api.services.pricing import PRICE_RECEIPT_KEY
 from apps.api.services.product_images import is_storefront_image_url
 
 
@@ -77,11 +78,22 @@ class ChannelOut(BaseModel):
     status: str
     last_parsed_at: datetime | None
     last_error: str | None
+    counts_toward_price: bool = True
 
 
 class ChannelStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: str = Field(pattern="^(active|paused|error)$")
+    counts_toward_price: bool | None = None
+
+
+class PriceReceiptOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    accepted_n: int = Field(ge=0)
+    quarantined_n: int = Field(ge=0)
+    quarantined: list[str] = Field(default_factory=list, max_length=20)
+    markup_percent: float | None = None
+    round_to: int | None = None
 
 
 class AdminProductOut(BaseModel):
@@ -99,11 +111,25 @@ class AdminProductOut(BaseModel):
     is_manual: bool
     image_url: str | None = None
     updated_at: datetime
+    price_receipt: PriceReceiptOut | None = None
 
     @field_validator("image_url", mode="before")
     @classmethod
     def only_local_image(cls, value: Any) -> str | None:
         return _storefront_image(value)
+
+
+def admin_product_out(product: Any) -> AdminProductOut:
+    out = AdminProductOut.model_validate(product)
+    raw = getattr(product, "attributes", None)
+    receipt = raw.get(PRICE_RECEIPT_KEY) if isinstance(raw, dict) else None
+    parsed: PriceReceiptOut | None = None
+    if receipt is not None:
+        try:
+            parsed = PriceReceiptOut.model_validate(receipt)
+        except ValidationError:
+            parsed = None
+    return out.model_copy(update={"price_receipt": parsed})
 
 
 class AdminProductListOut(BaseModel):
@@ -167,6 +193,7 @@ class StoreSettingsOut(BaseModel):
     referral_percent_l2: Decimal
     referral_percent_l3: Decimal
     markup_rules: list[MarkupRule] = Field(default_factory=list)
+    last_sync_stats: dict[str, Any] = Field(default_factory=dict)
 
 
 class StoreSettingsUpdate(BaseModel):

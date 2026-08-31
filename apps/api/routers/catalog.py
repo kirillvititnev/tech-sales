@@ -22,6 +22,7 @@ from apps.api.services.product_images import media_type_for, resolve_image_file
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 CATALOG_ID_LOOKUP_LIMIT = 50
+CATALOG_LIST_LIMIT = 120
 
 
 @router.get("/media/{name}")
@@ -283,7 +284,7 @@ async def list_products(
     min_price: Decimal | None = Query(default=None, ge=0),
     max_price: Decimal | None = Query(default=None, ge=0),
     sort: str = Query(default="relevance"),
-    limit: int = Query(default=120, ge=1, le=500),
+    limit: int = Query(default=120, ge=1, le=CATALOG_LIST_LIMIT),
     offset: int = Query(default=0, ge=0),
     ids: list[UUID] | None = Query(default=None),
     db: AsyncSession = Depends(get_db),

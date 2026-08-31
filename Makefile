@@ -1,4 +1,4 @@
-.PHONY: help env up up-all up-dev down logs api worker web install migrate tunnel
+.PHONY: help env up up-all up-dev down logs api worker web web-prod install migrate tunnel
 
 help:
 	@echo "White Shop — common commands"
@@ -12,8 +12,9 @@ help:
 	@echo "  make api       run FastAPI locally"
 	@echo "  make worker    run ARQ worker locally"
 	@echo "  make tg-login  interactive Telegram session login"
-	@echo "  make web       run Next.js locally"
-	@echo "  make tunnel    publish local :3000 via Cloudflare (needs login)"
+	@echo "  make web       run Next.js locally (dev, loopback only)"
+	@echo "  make web-prod  next start on 127.0.0.1:3000 (use this before make tunnel)"
+	@echo "  make tunnel    publish local :3000 via Cloudflare (needs login; not next dev)"
 	@echo "  make migrate    alembic upgrade head"
 	@echo "  make seed      seed demo categories/products"
 	@echo "  make test      run unit tests"
@@ -57,9 +58,14 @@ sync-apple:
 
 web:
 	@python3 scripts/secure_env.py >/dev/null
-	cd apps/web && npm run dev
+	cd apps/web && npm run dev -- --hostname 127.0.0.1 --port 3000
+
+web-prod:
+	@python3 scripts/secure_env.py >/dev/null
+	cd apps/web && npm run build && npm run start -- --hostname 127.0.0.1 --port 3000
 
 tunnel:
+	@echo "Use a production Next server on :3000 (make web-prod). next dev exposes debug routes."
 	cloudflared tunnel --config infra/tunnel/config.yml run
 
 seed:

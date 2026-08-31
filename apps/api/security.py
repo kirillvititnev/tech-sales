@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import hashlib
+import ipaddress
 import os
 import secrets
 import time
@@ -117,7 +118,23 @@ def admin_credentials_valid(username: str, password: str) -> bool:
     return user_ok and pass_ok
 
 
+def admin_csrf_allowed(request: Request) -> bool:
+    """Fetch Metadata: browsers send Sec-Fetch-Site; curl/tests omit it."""
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return True
+    path = request.url.path
+    if not path.startswith("/api/v1/admin"):
+        return True
+    site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if site in {"", "none", "same-origin"}:
+        return True
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    allowed = {item.rstrip("/") for item in get_settings().cors_origin_list}
+    return bool(origin and origin in allowed)
+
+
 async def require_admin(
+    request: Request,
     credentials: HTTPBasicCredentials | None = Depends(http_basic),
 ) -> str:
     if not admin_credentials_configured():
@@ -130,6 +147,11 @@ async def require_admin(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Требуется вход в админку",
             headers={"WWW-Authenticate": 'Basic realm="White Shop admin"'},
+        )
+    if not admin_csrf_allowed(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Недопустимый источник запроса",
         )
     return credentials.username
 
@@ -235,19 +257,119 @@ class RateDecision:
 
 
 limiter = SlidingWindowLimiter()
+_redis_client: Any = None
+_redis_lock = Lock()
+_redis_disabled = False
+
+
+_RFC1918 = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
+
+
+def _peer_is_trusted_proxy(host: str) -> bool:
+    name = (host or "").strip().lower()
+    if not name:
+        return False
+    extra = {item.strip().lower() for item in get_settings().trusted_proxy_list}
+    if name in extra or name in {"localhost"}:
+        return True
+    if name.startswith("::ffff:"):
+        name = name[7:]
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    if ip.is_loopback:
+        return True
+    if ip.version == 4:
+        return any(ip in net for net in _RFC1918)
+    return bool(ip in ipaddress.ip_network("fc00::/7") or ip.is_link_local)
 
 
 def client_ip(request: Request) -> str:
-    # Prefer hop-by-hop headers set by Cloudflare; do not trust X-Forwarded-For.
-    cf = request.headers.get("cf-connecting-ip")
-    if cf:
-        return cf.strip()
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
+    """Socket peer, unless that peer is a local/private reverse proxy."""
+    peer = ""
     if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+        peer = request.client.host.strip()
+    if _peer_is_trusted_proxy(peer):
+        cf = (request.headers.get("cf-connecting-ip") or "").strip()
+        if cf:
+            return cf
+        real = (request.headers.get("x-real-ip") or "").strip()
+        if real:
+            return real
+    return peer or "unknown"
+
+
+def _redis() -> Any:
+    """Optional shared counter store. Failures fall back to in-process memory."""
+    global _redis_client, _redis_disabled
+    if _redis_disabled:
+        return None
+    if _redis_client is not None:
+        return _redis_client
+    with _redis_lock:
+        if _redis_disabled:
+            return None
+        if _redis_client is not None:
+            return _redis_client
+        url = (get_settings().redis_url or "").strip()
+        if not url:
+            _redis_disabled = True
+            return None
+        try:
+            import redis
+
+            client = redis.Redis.from_url(url, socket_connect_timeout=0.15, socket_timeout=0.15)
+            client.ping()
+        except Exception:
+            _redis_disabled = True
+            return None
+        _redis_client = client
+        return _redis_client
+
+
+def _redis_check(key: str, limit: int, window_sec: float) -> RateDecision | None:
+    client = _redis()
+    if client is None:
+        return None
+    now = time.time()
+    cutoff = now - window_sec
+    try:
+        pipe = client.pipeline()
+        pipe.zremrangebyscore(key, 0, cutoff)
+        pipe.zcard(key)
+        _removed, count = pipe.execute()
+        if int(count) >= limit:
+            oldest = client.zrange(key, 0, 0, withscores=True)
+            retry_after = 1
+            if oldest:
+                retry_after = max(1, int(oldest[0][1] + window_sec - now) + 1)
+            return RateDecision(
+                allowed=False,
+                limit=limit,
+                remaining=0,
+                retry_after=retry_after,
+                reset_epoch=int(now + window_sec),
+            )
+        member = f"{now:.6f}:{secrets.token_hex(4)}"
+        pipe = client.pipeline()
+        pipe.zadd(key, {member: now})
+        pipe.expire(key, int(window_sec) + 2)
+        pipe.execute()
+        remaining = max(0, limit - int(count) - 1)
+        return RateDecision(
+            allowed=True,
+            limit=limit,
+            remaining=remaining,
+            retry_after=0,
+            reset_epoch=int(now + window_sec),
+        )
+    except Exception:
+        return None
 
 
 def rate_limit_rule(method: str, path: str) -> tuple[str, int, float] | None:
@@ -306,8 +428,11 @@ def check_rate_limit(request: Request) -> dict[str, str]:
     if rule is None:
         return {}
     suffix, limit, window = rule
-    key = f"{client_ip(request)}:{suffix}"
-    decision = limiter.check(key, limit, window)
+    ip = client_ip(request)
+    redis_key = f"rl:{ip}:{suffix}"
+    decision = _redis_check(redis_key, limit, window)
+    if decision is None:
+        decision = limiter.check(f"{ip}:{suffix}", limit, window)
     headers = rate_limit_headers(decision)
     request.state.rate_limit_headers = headers
     if not decision.allowed:

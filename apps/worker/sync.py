@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 from telethon.tl.types import InputPeerChannel
 
 from apps.api.db import SessionLocal
@@ -26,7 +27,12 @@ from apps.api.models.catalog import (
 from apps.api.services.admin_alerts import is_price_jump, notify_admin_ops
 from apps.api.services.customer_notify import customer_telegrams_for, deliver_customer_telegrams
 from apps.api.services.favorite_alerts import notify_favorite_watchers, watches_for_update
-from apps.api.services.pricing import resolve_markup, storefront_price
+from apps.api.services.pricing import (
+    quote_storefront,
+    receipt_payload,
+    resolve_markup,
+    with_price_receipt,
+)
 from apps.api.services.product_images import message_photo_eligible, store_image
 from apps.worker.config import get_worker_settings
 from apps.worker.folders import get_folder_channels
@@ -59,6 +65,18 @@ async def ensure_schema(session: AsyncSession) -> None:
         text(
             "ALTER TABLE store_settings "
             "ADD COLUMN IF NOT EXISTS markup_rules JSONB NOT NULL DEFAULT '[]'::jsonb"
+        )
+    )
+    await session.execute(
+        text(
+            "ALTER TABLE store_settings "
+            "ADD COLUMN IF NOT EXISTS last_sync_stats JSONB NOT NULL DEFAULT '{}'::jsonb"
+        )
+    )
+    await session.execute(
+        text(
+            "ALTER TABLE supplier_channels "
+            "ADD COLUMN IF NOT EXISTS counts_toward_price BOOLEAN NOT NULL DEFAULT true"
         )
     )
     await session.commit()
@@ -122,6 +140,7 @@ async def sync_folder(
         "attachments": 0,
         "photos": 0,
         "favorite_notices": 0,
+        "quarantined": 0,
     }
     parse_errors: list[tuple[str, str]] = []
     price_jumps: list[tuple[str, Decimal, Decimal]] = []
@@ -178,6 +197,7 @@ async def sync_folder(
             synced_channel_ids: list = []
             favorite_events: list = []
             photo_by_message: dict[str, str] = {}
+            channel_counts_price: dict[uuid.UUID, bool] = {}
 
             for fc in folder_channels:
                 channel: SupplierChannel | None = None
@@ -191,6 +211,7 @@ async def sync_folder(
                         folder_label=folder_name,
                     )
                     synced_channel_ids.append(channel.id)
+                    channel_counts_price[channel.id] = bool(getattr(channel, "counts_toward_price", True))
                     stats["channels"] += 1
 
                     entity = await client.get_entity(
@@ -441,7 +462,12 @@ async def sync_folder(
                 except ValueError:
                     continue
                 floor = Decimal(max(int(min_price), min_price_for_kind(kind_enum)))
-                prices = [Decimal(o.raw_price) for o in offer_list if Decimal(o.raw_price) >= floor]
+                prices = [
+                    Decimal(o.raw_price)
+                    for o in offer_list
+                    if Decimal(o.raw_price) >= floor
+                    and channel_counts_price.get(o.channel_id, True)
+                ]
                 if not prices:
                     continue
                 markup_pct = resolve_markup(
@@ -451,9 +477,12 @@ async def sync_folder(
                     category=str(meta.get("device_category") or "") or None,
                     kind=kind,
                 )
-                cost, price = storefront_price(prices, markup_percent=markup_pct, round_to=round_to)
-                if cost < floor:
+                quote = quote_storefront(prices, markup_percent=markup_pct, round_to=round_to)
+                cost, price = quote.cost_median, quote.price
+                if cost is None or price is None or cost < floor:
                     continue
+                stats["quarantined"] += len(quote.quarantined)
+                receipt = receipt_payload(quote, markup_pct, round_to)
                 slug = make_slug(key, title)
                 regions = sorted(meta.get("regions") or [])
                 attrs = {
@@ -479,6 +508,7 @@ async def sync_folder(
                     ),
                     "region_samples": regions,
                 }
+                attrs = with_price_receipt(attrs, receipt)
 
                 existing = await session.execute(select(Product).where(Product.slug == slug))
                 product = existing.scalar_one_or_none()
@@ -515,6 +545,7 @@ async def sync_folder(
                     product.markup_percent = Decimal(str(markup_pct))
                     product.is_published = True
                     product.attributes = attrs
+                    flag_modified(product, "attributes")
                     stats["products"] += 1
                     if is_price_jump(
                         Decimal(str(old_price)) if old_price is not None else None,
@@ -561,6 +592,18 @@ async def sync_folder(
             except Exception:  # noqa: BLE001
                 logger.exception("Favorite watch notices failed")
                 jobs = []
+            try:
+                from apps.api.services.admin_catalog import get_or_create_store_settings
+
+                store = await get_or_create_store_settings(session)
+                store.last_sync_stats = {
+                    "folder": folder_name,
+                    "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    **{key: int(val) for key, val in stats.items()},
+                }
+                flag_modified(store, "last_sync_stats")
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not persist last_sync_stats")
             await session.commit()
             if jobs:
                 try:

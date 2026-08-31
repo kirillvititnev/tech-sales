@@ -11,7 +11,7 @@ export default function CheckoutPage() {
   if (!ready) {
     return (
       <main className="section">
-        <h2>Оформление заказа</h2>
+        <h2>Оформление заявки</h2>
         <p className="lead">Загрузка…</p>
       </main>
     );
@@ -20,8 +20,8 @@ export default function CheckoutPage() {
   if (!lines.length) {
     return (
       <main className="section">
-        <h2>Оформление</h2>
-        <p className="lead">Корзина пуста. Добавьте товары, затем оформите заказ.</p>
+        <h2>Оформление заявки</h2>
+        <p className="lead">Корзина пуста. Добавьте товары, затем отправьте заявку.</p>
         <Link href="/cart" className="btn btn-primary">
           В корзину
         </Link>
@@ -31,7 +31,7 @@ export default function CheckoutPage() {
 
   return (
     <main className="section">
-      <h2>Оформление заказа</h2>
+      <h2>Оформление заявки</h2>
       <CheckoutForm items={lines} clearCartOnSuccess />
     </main>
   );

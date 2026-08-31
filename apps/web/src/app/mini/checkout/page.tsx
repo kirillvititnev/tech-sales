@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { CheckoutForm } from "@/components/CheckoutForm";
 import { useCart } from "@/lib/cart";
+import { stashOrderAccess } from "@/lib/orderAccess";
 import { useTelegramPrefill } from "@/lib/telegram";
 
 export default function MiniCheckoutPage() {
@@ -13,7 +14,7 @@ export default function MiniCheckoutPage() {
   if (!ready) {
     return (
       <main className="section">
-        <h2>Оформление заказа</h2>
+        <h2>Оформление заявки</h2>
         <p className="lead">Загрузка…</p>
       </main>
     );
@@ -33,13 +34,14 @@ export default function MiniCheckoutPage() {
 
   return (
     <main className="section">
-      <h2>Оформление заказа</h2>
+      <h2>Оформление заявки</h2>
       <CheckoutForm
         items={lines}
         defaults={prefill}
-        successHref={(number, access) =>
-          `/mini/order/${number}?access=${encodeURIComponent(access)}`
-        }
+        successHref={(number, access) => {
+          stashOrderAccess(number, access);
+          return `/mini/order/${number}`;
+        }}
         loginHref="/mini/account"
         clearCartOnSuccess
       />

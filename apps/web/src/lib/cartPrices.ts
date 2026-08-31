@@ -15,11 +15,26 @@ export type LiveProduct = {
   price: string | null;
 };
 
+export type CartPendingChange = {
+  productId: string;
+  title: string;
+  kind: "increase" | "removed";
+  oldPrice: string | null;
+  newPrice: string | null;
+};
+
 export type MergeLiveCartResult = {
   next: CartLine[];
-  removed: number;
-  changed: number;
+  droppedPrices: number;
+  pending: CartPendingChange[];
 };
+
+function cents(value: string | null | undefined): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100);
+}
 
 export function mergeLiveCart(
   prev: CartLine[],
@@ -32,38 +47,62 @@ export function mergeLiveCart(
       .filter((product) => product.price != null && String(product.price) !== "")
       .map((product) => [product.id, product]),
   );
-  let removed = 0;
-  let changed = 0;
+  let droppedPrices = 0;
+  const pending: CartPendingChange[] = [];
   const next = prev.flatMap((line) => {
     if (!requested.has(line.productId)) {
       return [line];
     }
     const product = byId.get(line.productId);
     if (!product || product.price == null) {
-      removed += 1;
-      return [];
+      pending.push({
+        productId: line.productId,
+        title: line.title,
+        kind: "removed",
+        oldPrice: line.price,
+        newPrice: null,
+      });
+      return [line];
     }
     const price = String(product.price);
-    if (price !== String(line.price) || product.title !== line.title) {
-      changed += 1;
+    const oldCents = cents(line.price);
+    const newCents = cents(price);
+    const updated: CartLine = {
+      ...line,
+      slug: product.slug,
+      title: product.title,
+      brand: product.brand,
+    };
+    if (oldCents != null && newCents != null && newCents < oldCents) {
+      droppedPrices += 1;
+      return [{ ...updated, price }];
     }
-    return [
-      {
-        ...line,
-        slug: product.slug,
+    if (oldCents == null || newCents == null || newCents > oldCents) {
+      pending.push({
+        productId: line.productId,
         title: product.title,
-        brand: product.brand,
-        price,
-      },
-    ];
+        kind: "increase",
+        oldPrice: line.price,
+        newPrice: price,
+      });
+      return [line];
+    }
+    return [updated];
   });
-  return { next, removed, changed };
+  return { next, droppedPrices, pending };
 }
 
-export function livePriceNote(removed: number, changed: number): string | null {
-  const parts: string[] = [];
-  if (changed) parts.push("Цены обновлены с витрины.");
-  if (removed === 1) parts.push("Один товар снят с витрины.");
-  else if (removed > 1) parts.push(`Снято с витрины: ${removed}.`);
-  return parts.join(" ") || null;
+export function acceptCartPending(lines: CartLine[], pending: CartPendingChange[]): CartLine[] {
+  const byId = new Map(pending.map((item) => [item.productId, item]));
+  return lines.flatMap((line) => {
+    const change = byId.get(line.productId);
+    if (!change) return [line];
+    if (change.kind === "removed" || change.newPrice == null) return [];
+    return [{ ...line, title: change.title, price: change.newPrice }];
+  });
+}
+
+export function livePriceNote(droppedPrices: number): string | null {
+  if (droppedPrices <= 0) return null;
+  return droppedPrices === 1 ? "Цена снижена с витрины." : "Цены снижены с витрины.";
 }

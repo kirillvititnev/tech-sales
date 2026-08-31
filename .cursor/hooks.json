@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeReadFile": [
+      {
+        "command": ".cursor/hooks/block-cyber-pack.sh",
+        "failClosed": true,
+        "timeout": 5
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/mark-graphify-dirty.sh",
+        "timeout": 5
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/graphify-update-if-dirty.sh",
+        "timeout": 120
+      }
+    ]
+  }
+}

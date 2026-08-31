@@ -12,10 +12,19 @@ type AdminProduct = {
   title: string;
   brand: string | null;
   price: string | null;
+  cost_median: string | null;
+  markup_percent: string | null;
   image_url: string | null;
   is_hot: boolean;
   is_published: boolean;
   is_manual: boolean;
+  price_receipt: {
+    accepted_n: number;
+    quarantined_n: number;
+    quarantined: string[];
+    markup_percent?: number | null;
+    round_to?: number | null;
+  } | null;
 };
 
 type Offer = {
@@ -158,6 +167,39 @@ export default function AdminProductPage() {
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div className="account-group">
+        <h3>Цена витрины</h3>
+        {product ? (
+          <>
+            <p className="account-note">
+              медиана поставщиков {formatPrice(product.cost_median)} · наценка{" "}
+              {product.markup_percent ?? "0"}% · витрина {formatPrice(product.price)}
+            </p>
+            {product.price_receipt ? (
+              <>
+                <p className="account-note">
+                  в медиане {product.price_receipt.accepted_n}
+                  {product.price_receipt.quarantined_n
+                    ? ` · отброшено ${product.price_receipt.quarantined_n}`
+                    : ""}
+                </p>
+                {product.price_receipt.quarantined.length > 0 ? (
+                  <ul className="account-list">
+                    {product.price_receipt.quarantined.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            ) : (
+              <p className="account-note">квиток медианы появится после синка</p>
+            )}
+          </>
+        ) : (
+          <p className="account-note">загрузка…</p>
+        )}
       </div>
 
       <h3>Лог цен</h3>

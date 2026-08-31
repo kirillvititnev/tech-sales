@@ -725,6 +725,39 @@ a.btn,
   margin: 1rem 0 1.15rem;
 }
 
+.cart-pending-list {
+  list-style: none;
+  margin: 1.1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.cart-pending-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cart-pending-item .account-note {
+  margin: 0.2rem 0 0;
+}
+
+.order-next {
+  margin: 0 0 1.25rem;
+  padding-left: 1.2rem;
+  color: var(--mute);
+}
+
+.order-next li + li {
+  margin-top: 0.35rem;
+}
+
+.product-sheet .cta-row {
+  margin-top: 1.15rem;
+}
+
 .product-sheet .cta-row .btn {
   flex: 1;
 }

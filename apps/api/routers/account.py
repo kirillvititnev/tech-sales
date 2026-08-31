@@ -27,6 +27,7 @@ from apps.api.schemas.account import (
 from apps.api.schemas.catalog import ProductOut
 from apps.api.schemas.order import OrderOut
 from apps.api.services.passwords import dummy_verify, verify_password
+from apps.api.services.privacy import erase_account_personal_data
 from apps.api.services.sessions import revoke_all_sessions
 
 router = APIRouter(prefix="/me", tags=["account"])
@@ -276,6 +277,7 @@ async def delete_me(
             raise HTTPException(status_code=400, detail="Нужен текущий пароль")
         if not verify_password(payload.password, user.password_hash):
             raise HTTPException(status_code=401, detail="Неверный пароль")
+    await erase_account_personal_data(db, user)
     await db.execute(sa_delete(Favorite).where(Favorite.user_id == user.id))
     await db.execute(sa_delete(ProductView).where(ProductView.user_id == user.id))
     await db.execute(sa_delete(UserNotification).where(UserNotification.user_id == user.id))

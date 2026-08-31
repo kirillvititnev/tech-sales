@@ -3,7 +3,9 @@ from __future__ import annotations
 from urllib.parse import urlencode
 
 from apps.api.security import (
+    admin_csrf_allowed,
     admin_credentials_valid,
+    client_ip,
     escape_like,
     is_weak_secret,
     public_product_attributes,
@@ -26,6 +28,7 @@ def test_public_attributes_drop_internal_keys() -> None:
         "region_samples": ["RU"],
         "storage": "256GB",
         "cost": "not-a-public-field",
+        "price_receipt": {"accepted_n": 3, "quarantined_n": 1},
     }
     out = public_product_attributes(raw)
     assert out["device_name"] == "iPhone 16"
@@ -33,6 +36,7 @@ def test_public_attributes_drop_internal_keys() -> None:
     assert "folder" not in out
     assert "norm_key" not in out
     assert "region_samples" not in out
+    assert "price_receipt" not in out
 
 
 def test_admin_rejects_wrong_password(monkeypatch) -> None:
@@ -107,3 +111,82 @@ def test_runtime_secret_problems_flag_defaults(monkeypatch) -> None:
         assert any("API_SECRET_KEY" in p for p in problems)
     finally:
         get_settings.cache_clear()
+
+
+def _request(method: str, path: str, client_host: str, headers: dict[str, str] | None = None):
+    from starlette.requests import Request
+
+    encoded = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": encoded,
+        "client": (client_host, 12345),
+        "server": ("127.0.0.1", 8000),
+    }
+    return Request(scope)
+
+
+def test_client_ip_ignores_headers_from_public_peer() -> None:
+    req = _request(
+        "GET",
+        "/api/v1/catalog/products",
+        "203.0.113.8",
+        {"cf-connecting-ip": "198.51.100.1", "x-real-ip": "198.51.100.2"},
+    )
+    assert client_ip(req) == "203.0.113.8"
+
+
+def test_client_ip_trusts_headers_from_loopback() -> None:
+    req = _request(
+        "GET",
+        "/api/v1/catalog/products",
+        "127.0.0.1",
+        {"cf-connecting-ip": "198.51.100.9"},
+    )
+    assert client_ip(req) == "198.51.100.9"
+
+
+def test_client_ip_trusts_headers_from_private_peer() -> None:
+    req = _request(
+        "GET",
+        "/api/v1/catalog/products",
+        "172.18.0.4",
+        {"x-real-ip": "203.0.113.50"},
+    )
+    assert client_ip(req) == "203.0.113.50"
+
+
+def test_admin_csrf_blocks_cross_site_mutations() -> None:
+    req = _request(
+        "POST",
+        "/api/v1/admin/orders/x/status",
+        "127.0.0.1",
+        {"sec-fetch-site": "cross-site", "origin": "https://evil.example"},
+    )
+    assert admin_csrf_allowed(req) is False
+
+
+def test_admin_csrf_allows_same_origin_and_non_browser() -> None:
+    same = _request(
+        "POST",
+        "/api/v1/admin/orders/x/status",
+        "127.0.0.1",
+        {"sec-fetch-site": "same-origin", "origin": "http://localhost:3000"},
+    )
+    curl = _request("POST", "/api/v1/admin/orders/x/status", "127.0.0.1")
+    get_cross = _request(
+        "GET",
+        "/api/v1/admin/orders",
+        "127.0.0.1",
+        {"sec-fetch-site": "cross-site", "origin": "https://evil.example"},
+    )
+    assert admin_csrf_allowed(same) is True
+    assert admin_csrf_allowed(curl) is True
+    assert admin_csrf_allowed(get_cross) is True

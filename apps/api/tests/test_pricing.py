@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from apps.api.schemas.catalog import MarkupRule, StoreSettingsUpdate
+from apps.api.schemas.catalog import ChannelStatusUpdate, MarkupRule, StoreSettingsUpdate, admin_product_out
 from apps.api.services.pricing import apply_markup, compute_median_cost, resolve_markup, round_price, storefront_price
 
 
@@ -69,9 +69,70 @@ def test_markup_rule_forbids_extra() -> None:
 def test_settings_update_forbids_extra_and_caps_rules() -> None:
     with pytest.raises(ValidationError):
         StoreSettingsUpdate.model_validate({"default_markup_percent": 0, "is_active": True})
+    with pytest.raises(ValidationError):
+        StoreSettingsUpdate.model_validate({"last_sync_stats": {"channels": 1}})
     too_many = [{"match": "brand", "value": str(i), "percent": 1} for i in range(51)]
     with pytest.raises(ValidationError):
         StoreSettingsUpdate.model_validate({"markup_rules": too_many})
     StoreSettingsUpdate.model_validate(
         {"markup_rules": [{"match": "kind", "value": "iphone", "percent": 0}]}
     )
+
+
+def test_channel_status_forbids_extra() -> None:
+    ChannelStatusUpdate.model_validate({"status": "active", "counts_toward_price": False})
+    with pytest.raises(ValidationError):
+        ChannelStatusUpdate.model_validate({"status": "active", "role": "admin"})
+
+
+def test_outlier_does_not_move_median() -> None:
+    from apps.api.services.pricing import quarantine_outliers, quote_storefront
+
+    kept, dropped = quarantine_outliers([100000, 101000, 99000, 999000])
+    assert Decimal("999000.00") in {p for p, _ in dropped}
+    assert Decimal("999000.00") not in kept
+    quote = quote_storefront([100000, 101000, 99000, 999000], markup_percent=0, round_to=100)
+    assert quote.cost_median == Decimal("100000.00")
+    assert quote.price == Decimal("100000")
+
+
+def test_two_prices_skip_quarantine() -> None:
+    from apps.api.services.pricing import quarantine_outliers
+
+    kept, dropped = quarantine_outliers([100000, 500000])
+    assert dropped == []
+    assert len(kept) == 2
+
+
+def test_admin_product_out_maps_receipt() -> None:
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    product = SimpleNamespace(
+        id=uuid4(),
+        slug="iphone-air",
+        title="iPhone Air",
+        brand="Apple",
+        price=Decimal("100000"),
+        cost_median=Decimal("100000.00"),
+        markup_percent=Decimal("0.00"),
+        is_hot=False,
+        is_published=True,
+        is_manual=False,
+        image_url=None,
+        updated_at=datetime.now(timezone.utc),
+        attributes={
+            "price_receipt": {
+                "accepted_n": 3,
+                "quarantined_n": 1,
+                "quarantined": ["999000.00 (outlier)"],
+                "markup_percent": 0,
+                "round_to": 100,
+            }
+        },
+    )
+    out = admin_product_out(product)
+    assert out.price_receipt is not None
+    assert out.price_receipt.accepted_n == 3
+    assert out.price_receipt.quarantined == ["999000.00 (outlier)"]

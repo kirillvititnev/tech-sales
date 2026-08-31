@@ -4,7 +4,7 @@ import hmac
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -80,9 +80,16 @@ async def create_order(
         raise HTTPException(status_code=400, detail=delivery_err)
 
     telegram = (payload.customer_telegram or "").strip() or None
-    verified = _verified_telegram_username(payload.telegram_init_data)
-    if verified:
-        telegram = verified
+    init_data = (payload.telegram_init_data or "").strip() or None
+    if init_data:
+        settings = get_settings()
+        if not settings.telegram_bot_token:
+            raise HTTPException(status_code=400, detail="Недействительные данные Telegram")
+        if verify_telegram_init_data(init_data, settings.telegram_bot_token) is None:
+            raise HTTPException(status_code=400, detail="Недействительные данные Telegram")
+        verified = _verified_telegram_username(init_data)
+        if verified:
+            telegram = verified
 
     product_ids = [i.product_id for i in payload.items]
     result = await db.execute(
@@ -176,15 +183,20 @@ async def create_order(
 @router.get("/by-number/{number}", response_model=OrderOut)
 async def get_order_by_number(
     number: str,
-    access: str = Query(min_length=8, max_length=128),
+    request: Request,
+    access: str | None = Query(default=None, min_length=8, max_length=128),
     db: AsyncSession = Depends(get_db),
 ) -> OrderOut:
+    header = (request.headers.get("x-order-access") or "").strip()
+    secret = header or (access or "").strip()
+    if len(secret) < 8 or len(secret) > 128:
+        raise HTTPException(status_code=422, detail="Нужен ключ доступа")
     result = await db.execute(_load_order_query().where(Order.number == number.upper()))
     order = result.scalar_one_or_none()
     token = order.access_token if order else ""
     # Constant-time compare even when the order is missing.
-    dummy = token or ("x" * len(access))
-    match = hmac.compare_digest(dummy, access) if len(dummy) == len(access) else False
+    dummy = token or ("x" * len(secret))
+    match = hmac.compare_digest(dummy, secret) if len(dummy) == len(secret) else False
     if not order or not match:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     return _public_order(order, include_access=False)

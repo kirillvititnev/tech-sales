@@ -44,3 +44,10 @@ infra/tunnel/config.yml
 
 # Compound Engineering
 .compound-engineering/*.local.yaml
+
+# Cybersecurity skill archive (800+; not for agent discovery / not committed)
+.vendor/cybersecurity-skills/
+
+# graphify dirty stamp / last-run (local hook state)
+.cursor/hooks/.graphify-dirty
+.cursor/hooks/.graphify-last-run

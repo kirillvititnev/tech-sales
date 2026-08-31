@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCart, type CartLine } from "@/lib/cart";
 import { apiErrorMessage, formatPrice } from "@/lib/api";
 import { useAuth, type Me } from "@/lib/auth";
+import { stashOrderAccess } from "@/lib/orderAccess";
 import type { CheckoutPrefill } from "@/lib/telegramUser";
 
 type DeliveryType = "pickup_moscow" | "cdek";
@@ -35,7 +36,7 @@ export function CheckoutForm({
   clearCartOnSuccess?: boolean;
 }) {
   const router = useRouter();
-  const { lines, clear, pricesSyncing, priceNote } = useCart();
+  const { lines, clear, pricesSyncing, priceNote, pricePending } = useCart();
   const { me, ready: authReady, authFetch, reloadMe } = useAuth();
   const [name, setName] = useState(defaults?.name ?? "");
   const [phone, setPhone] = useState("");
@@ -116,9 +117,8 @@ export function CheckoutForm({
       if (clearCartOnSuccess) clear();
       await reloadMe();
       const access = typeof data.access_token === "string" ? data.access_token : "";
-      const href = successHref
-        ? successHref(data.number, access)
-        : `/order/${data.number}?access=${encodeURIComponent(access)}`;
+      if (access) stashOrderAccess(data.number, access);
+      const href = successHref ? successHref(data.number, access) : `/order/${data.number}`;
       router.push(href);
     } catch {
       setError("Сеть недоступна. Проверьте API.");
@@ -130,14 +130,14 @@ export function CheckoutForm({
   return (
     <form className="checkout-form" onSubmit={onSubmit}>
       <div className="checkout-summary">
-        <p className="product-brand">Заказ</p>
-        {pricesSyncing ? (
-          <p className="lead">Сверяем цены с витриной…</p>
-        ) : priceNote ? (
+        <p className="product-brand">Заявка менеджеру</p>
+        {pricesSyncing ? <p className="lead">Сверяем цены с витриной…</p> : null}
+        {priceNote ? (
           <p className="lead" role="status">
             {priceNote}
           </p>
         ) : null}
+        <p className="lead">Цена на карточке — котировка витрины, не оплаченный чек.</p>
         <ul className="cart-summary-list">
           {cartLines.map((l) => (
             <li key={l.productId}>
@@ -152,7 +152,7 @@ export function CheckoutForm({
           </>
         ) : null}
         <p className="checkout-price">{formatPrice(String(payable))}</p>
-        <p className="lead">Оплата через менеджера после подтверждения — онлайн-оплаты нет.</p>
+        <p className="lead">Оплата — только через менеджера после подтверждения. Онлайн-оплаты нет.</p>
         {authReady && !me ? (
           <p className="lead">
             <Link href={loginHref}>Войдите</Link>, чтобы заказ появился в кабинете и можно было
@@ -286,9 +286,9 @@ export function CheckoutForm({
       <button
         className="btn btn-primary"
         type="submit"
-        disabled={pending || pricesSyncing || !cartLines.length || !privacyConsent}
+        disabled={pending || pricesSyncing || pricePending.length > 0 || !cartLines.length || !privacyConsent}
       >
-        {pending ? "Оформляем…" : "Оформить заказ"}
+        {pending ? "Отправляем…" : "Отправить заявку"}
       </button>
     </form>
   );

@@ -25,6 +25,17 @@ function emptyRule(): RuleDraft {
   return { match: "brand", value: "", percent: "0", error: null };
 }
 
+function formatSyncStats(stats: Record<string, unknown> | undefined): string | null {
+  if (!stats) return null;
+  const folder = typeof stats.folder === "string" ? stats.folder : null;
+  const finished = typeof stats.finished_at === "string" ? stats.finished_at : null;
+  if (!folder && !finished) return null;
+  const when = finished ? new Date(finished).toLocaleString("ru-RU") : "—";
+  const products = typeof stats.products === "number" ? stats.products : 0;
+  const quarantined = typeof stats.quarantined === "number" ? stats.quarantined : 0;
+  return `последний синк: ${folder ?? "каталог"} · ${when} · карточек ${products} · отброшено ${quarantined}`;
+}
+
 function parsePercent(raw: string): number | null {
   const n = Number(raw.replace(",", ".").trim());
   if (!Number.isFinite(n)) return null;
@@ -47,6 +58,7 @@ export default function AdminSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [syncBlurb, setSyncBlurb] = useState<string | null>(null);
 
   function applySettings(data: {
     default_markup_percent: string | number;
@@ -55,12 +67,14 @@ export default function AdminSettingsPage() {
     referral_percent_l2?: string | number;
     referral_percent_l3?: string | number;
     markup_rules?: { match?: string; value?: string; percent?: string | number }[];
+    last_sync_stats?: Record<string, unknown>;
   }) {
     setMarkup(String(data.default_markup_percent));
     setRoundTo(String(data.price_round_to));
     setL1(String(data.referral_percent_l1 ?? "5"));
     setL2(String(data.referral_percent_l2 ?? "2"));
     setL3(String(data.referral_percent_l3 ?? "1"));
+    setSyncBlurb(formatSyncStats(data.last_sync_stats));
     setRules(
       (data.markup_rules ?? []).map((rule) => ({
         match: isMatch(rule.match ?? "") ? rule.match : "brand",
@@ -179,6 +193,7 @@ export default function AdminSettingsPage() {
         совпадение побеждает. Уведомления о заказах уходят в Telegram, если заданы токен бота и чат
         администратора.
       </p>
+      {syncBlurb ? <p className="account-note">{syncBlurb}</p> : null}
       <form className="checkout-form settings-form" onSubmit={onSave}>
         <div className="account-groups">
           <section className="account-group">

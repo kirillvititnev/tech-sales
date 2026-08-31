@@ -5,6 +5,12 @@ credentials-file: /Users/YOU/.cloudflared/TUNNEL_ID.json
 
 ingress:
   - hostname: whiteshop.tech
+    path: ^/__nextjs_.*
+    service: http_status:404
+  - hostname: www.whiteshop.tech
+    path: ^/__nextjs_.*
+    service: http_status:404
+  - hostname: whiteshop.tech
     service: http://127.0.0.1:3000
   - hostname: www.whiteshop.tech
     service: http://127.0.0.1:3000
