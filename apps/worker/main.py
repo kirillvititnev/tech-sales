@@ -44,3 +44,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = _redis_settings()
+    # One Telethon SQLite session — never run overlapping parse jobs.
+    max_jobs = 1
+    job_timeout = 1200
+    max_tries = 1
