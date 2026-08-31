@@ -39,6 +39,29 @@ make up-all
 
 Для hot-reload в контейнерах: `make up-dev`.
 
+## Mac Mini (prod, РФ)
+
+Перенос с текущего Mac через AirDrop + одна команда на Mini.
+
+**До упаковки на текущем Mac:** рабочий `.env`, `data/telegram.session`, Cloudflare tunnel credentials, и заполненный `infra/vpn/xray.config.json` (из `infra/vpn/xray.config.example.json` — без плейсхолдеров).
+
+```bash
+# На текущем Mac (опционально --with-db для дампа каталога/заказов):
+./scripts/pack-mac-mini-handoff.sh --with-db
+# → ~/Desktop/whiteshop-mac-mini-handoff.tgz  →  AirDrop на Mini
+```
+
+```bash
+# На Mac Mini (первый раз может попросить клик в Docker Desktop):
+git clone -b feat/bests-multibrand-parser https://github.com/kirillvititnev/tech-sales.git ~/Projects/tech-sales
+cd ~/Projects/tech-sales
+./scripts/mac-mini-bootstrap.sh ~/Downloads/whiteshop-mac-mini-handoff.tgz
+```
+
+Скрипт ставит Homebrew/Docker Desktop/cloudflared при необходимости, распаковывает секреты и Telegram-сессию, поднимает `docker compose` с `--profile vpn` и `TELEGRAM_PROXY`, ставит LaunchAgent для Cloudflare Tunnel. После успеха удали `.tgz` с Desktop/Downloads.
+
+Обновление кода позже: `git pull && docker compose -f docker-compose.yml -f docker-compose.mac-mini.yml --profile vpn up -d --build`.
+
 ## Telegram
 
 1. Получи `api_id` / `api_hash` на https://my.telegram.org и пропиши в `.env`

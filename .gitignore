@@ -3,6 +3,8 @@
 .env.local
 *.session
 *.session-journal
+whiteshop-mac-mini-handoff.tgz
+**/whiteshop-mac-mini-handoff.tgz
 
 # python
 __pycache__/

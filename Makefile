@@ -1,4 +1,4 @@
-.PHONY: help env up up-all up-dev down logs api worker web web-prod install migrate tunnel
+.PHONY: help env up up-all up-dev down logs api worker web web-prod install migrate tunnel pack-mini
 
 help:
 	@echo "White Shop — common commands"
@@ -15,6 +15,7 @@ help:
 	@echo "  make web       run Next.js locally (dev, loopback only)"
 	@echo "  make web-prod  next start on 127.0.0.1:3000 (use this before make tunnel)"
 	@echo "  make tunnel    publish local :3000 via Cloudflare (needs login; not next dev)"
+	@echo "  make pack-mini AirDrop handoff for Mac Mini (add WITH_DB=1 for dump)"
 	@echo "  make migrate    alembic upgrade head"
 	@echo "  make seed      seed demo categories/products"
 	@echo "  make test      run unit tests"
@@ -67,6 +68,9 @@ web-prod:
 tunnel:
 	@echo "Use a production Next server on :3000 (make web-prod). next dev exposes debug routes."
 	cloudflared tunnel --config infra/tunnel/config.yml run
+
+pack-mini:
+	@if [ "$(WITH_DB)" = "1" ]; then ./scripts/pack-mac-mini-handoff.sh --with-db; else ./scripts/pack-mac-mini-handoff.sh; fi
 
 seed:
 	PYTHONPATH=. .venv/bin/python -m apps.api.seed
