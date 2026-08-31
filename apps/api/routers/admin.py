@@ -30,6 +30,7 @@ from apps.api.schemas.catalog import (
 from apps.api.schemas.order import AdminOrderAction, AdminOrderMessage, AdminOrderOut, AdminOrderStatusUpdate
 from apps.api.services.admin_catalog import get_or_create_store_settings, slugify_manual
 from apps.api.services.bonuses import apply_admin_bonus, set_user_active
+from apps.api.services.catalog_search import apply_search_tokens
 from apps.api.services.customer_notify import (
     CustomerTelegram,
     customer_telegrams_for,
@@ -225,16 +226,12 @@ async def admin_list_products(
     count_stmt = select(func.count()).select_from(Product)
     needle = (q or "").strip()
     if needle:
-        term = f"%{escape_like(needle)}%"
-        match = or_(
-            Product.title.ilike(term, escape="\\"),
-            Product.brand.ilike(term, escape="\\"),
-            Product.slug.ilike(term, escape="\\"),
-        )
-        stmt = stmt.where(match)
-        count_stmt = count_stmt.where(match)
+        stmt = apply_search_tokens(stmt, needle)
+        count_stmt = apply_search_tokens(count_stmt, needle)
     total = int((await db.execute(count_stmt)).scalar_one())
-    result = await db.execute(stmt.order_by(Product.updated_at.desc()).limit(limit).offset(offset))
+    result = await db.execute(
+        stmt.order_by(func.lower(Product.title).asc()).limit(limit).offset(offset)
+    )
     return AdminProductListOut(
         items=[admin_product_out(item) for item in result.scalars().all()],
         total=total,

@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from apps.api.routers.catalog import CATALOG_ID_LOOKUP_LIMIT, CATALOG_LIST_LIMIT, SORT_OPTIONS
 from apps.api.schemas.catalog import ProductOut
+from apps.api.services.catalog_search import search_tokens
 
 
 def test_catalog_sort_options() -> None:
@@ -11,6 +12,14 @@ def test_catalog_sort_options() -> None:
     assert "name_asc" in SORT_OPTIONS
     assert "newest" in SORT_OPTIONS
     assert "hot" in SORT_OPTIONS
+
+
+def test_search_tokens_match_storage_and_split_punct() -> None:
+    assert search_tokens("17 pro 256") == ["17", "pro", "256"]
+    assert search_tokens("17 Pro 256GB") == ["17", "pro", "256gb", "256"]
+    assert search_tokens("17-pro,256") == ["17", "pro", "256"]
+    assert search_tokens("  1TB silver  ") == ["1tb", "1", "silver"]
+    assert search_tokens("") == []
 
 
 def test_catalog_id_lookup_limit() -> None:

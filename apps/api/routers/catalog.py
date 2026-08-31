@@ -17,6 +17,7 @@ from apps.api.schemas.catalog import (
     SuggestItemOut,
 )
 from apps.api.security import escape_like, public_product_attributes
+from apps.api.services.catalog_search import apply_search_tokens
 from apps.api.services.product_images import media_type_for, resolve_image_file
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -66,25 +67,6 @@ def _kind_col():
     return Product.attributes["kind"].astext
 
 
-def _attr_text(key: str):
-    return Product.attributes[key].astext
-
-
-def _search_haystack():
-    """Title + brand + key attribute fields used for token search."""
-    return func.concat_ws(
-        " ",
-        Product.title,
-        Product.brand,
-        _device_name_col(),
-        _attr_text("config"),
-        _attr_text("storage"),
-        _attr_text("color"),
-        _attr_text("sim"),
-        _attr_text("ram"),
-    )
-
-
 def _apply_product_filters(
     stmt,
     *,
@@ -98,12 +80,7 @@ def _apply_product_filters(
 ):
     stmt = stmt.where(Product.is_published.is_(True))
     if q:
-        # Token AND-match so "17 pro max 256" hits "iPhone 17 Pro Max · 256GB · …"
-        haystack = _search_haystack()
-        for token in q.strip().split():
-            if not token:
-                continue
-            stmt = stmt.where(haystack.ilike(f"%{escape_like(token)}%", escape="\\"))
+        stmt = apply_search_tokens(stmt, q)
     if brand:
         stmt = stmt.where(Product.brand.ilike(escape_like(brand.strip()), escape="\\"))
     if category_id:
@@ -119,7 +96,7 @@ def _apply_product_filters(
     return stmt
 
 
-def _order_products(stmt, sort: str):
+def _order_products(stmt, sort: str, *, q: str | None = None):
     kind = _kind_col()
     kind_rank = case(
         (kind == "iphone", 0),
@@ -134,14 +111,14 @@ def _order_products(stmt, sort: str):
     if sort == "price_desc":
         return stmt.order_by(Product.price.desc().nulls_last(), Product.title.asc())
     if sort == "name_asc":
-        return stmt.order_by(device_name.asc().nulls_last(), Product.title.asc())
+        return stmt.order_by(Product.title.asc(), device_name.asc().nulls_last())
     if sort == "name_desc":
-        return stmt.order_by(device_name.desc().nulls_last(), Product.title.desc())
+        return stmt.order_by(Product.title.desc(), device_name.desc().nulls_last())
     if sort == "brand_asc":
         return stmt.order_by(
             Product.brand.asc().nulls_last(),
-            device_name.asc().nulls_last(),
             Product.title.asc(),
+            device_name.asc().nulls_last(),
         )
     if sort == "newest":
         return stmt.order_by(Product.updated_at.desc(), Product.title.asc())
@@ -152,7 +129,13 @@ def _order_products(stmt, sort: str):
             Product.title.asc(),
         )
 
-    # relevance (default): phones first, then brand / device / price
+    # Search: alphabetical titles (case-insensitive). Browse (no q): phones first.
+    if q and q.strip():
+        return stmt.order_by(
+            func.lower(Product.title).asc(),
+            Product.price.asc().nulls_last(),
+        )
+
     return stmt.order_by(
         Product.is_hot.desc(),
         kind_rank,
@@ -252,11 +235,9 @@ async def suggest_products(
     db: AsyncSession = Depends(get_db),
 ) -> list[SuggestItemOut]:
     stmt = select(Product).where(Product.is_published.is_(True))
-    haystack = _search_haystack()
-    for token in q.strip().split():
-        if token:
-            stmt = stmt.where(haystack.ilike(f"%{escape_like(token)}%", escape="\\"))
-    stmt = stmt.order_by(Product.is_hot.desc(), Product.title.asc()).limit(limit)
+    stmt = apply_search_tokens(stmt, q)
+    # Suggest under search is alphabetical by title
+    stmt = stmt.order_by(func.lower(Product.title).asc()).limit(limit)
     products = list((await db.execute(stmt)).scalars().all())
     out: list[SuggestItemOut] = []
     for p in products:
@@ -312,7 +293,7 @@ async def list_products(
         min_price=min_price,
         max_price=max_price,
     )
-    stmt = _order_products(stmt, sort_key).limit(limit).offset(offset)
+    stmt = _order_products(stmt, sort_key, q=q).limit(limit).offset(offset)
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
