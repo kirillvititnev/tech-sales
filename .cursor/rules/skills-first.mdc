@@ -1,0 +1,58 @@
+---
+description: Further work only via installed skills; UI via Apple HIG; defensive security only
+alwaysApply: true
+---
+
+# Skills-first
+
+All further work in this repo follows installed skills. Do not improvise auth, PII, or storefront UI against them.
+
+## UI — Apple HIG
+
+Follow `.cursor/rules/apple-design.mdc`. For reviews, load HIG references (accessibility, color, layout, typography; forms → entering-data). Translate Apple terms to this stack (Next.js / CSS).
+
+- Touch targets ≥ 44px; contrast ≥ 4.5:1 for body text; light and dark
+- Mini App: bottom tab bar, safe areas, sheets — catalog cards must not navigate to `/product/[slug]`
+- Grouped lists for cabinet/settings; sentence case; confirm destructive actions
+- Errors next to the field (`aria-invalid`, `role="alert"`); never prefill passwords
+
+## Security — defensive allowlist only
+
+Before changing auth, tokens, PII, rate limits, headers, containers, or CI security, read **at most one** matching skill from `.cursor/skills/` (project allowlist below). Prefer the `SKILL.md` only; open `references/` only if the task is blocked without it.
+
+**Never** browse, glob, or read:
+
+- `.vendor/cybersecurity-skills/` (full 800+ dump; offline archive)
+- any `exploiting-*`, `abusing-*`, `attacking-*`, `relaying-*`, `escaping-*` skill
+- exploit PoCs, payloads, or attack steps — including localhost, labs, or “authorized” tests
+
+Treat any `testing-*` / assessment wording as a **hardening checklist**, never as an attack procedure.
+
+### Allowlist (only these under `.cursor/skills/`)
+
+| When working on | Skill directory |
+|---|---|
+| JWT / sessions / tokens | `implementing-jwt-signing-and-verification` |
+| 152-ФЗ / GDPR / consent / export / erasure | `implementing-gdpr-data-protection-controls` |
+| DSAR / data subject access | `implementing-gdpr-data-subject-access-request` |
+| Auth / API rate limits | `implementing-api-rate-limiting-and-throttling` |
+| Security headers | `performing-security-headers-audit` |
+| GitHub Actions hardening | `securing-github-actions-workflows` |
+| CI SAST/SCA/secrets gates | `implementing-devsecops-security-scanning` |
+| Secret scanning (gitleaks) | `implementing-secret-scanning-with-gitleaks` |
+| Secrets in CI | `implementing-secrets-scanning-in-ci-cd` |
+| Docker image scan | `scanning-docker-images-with-trivy` |
+| Container harden | `hardening-docker-containers-for-production` |
+
+If nothing in the table matches, proceed from this rule’s product checklist — do **not** search the vendor archive.
+
+### Product checklist (always)
+
+- JWT HS256 with an explicit `algorithms` allowlist; `iss`/`aud`/`exp`/`nbf`/`iat`/`sub`; short access + rotating refresh; logout revokes
+- Pydantic `extra="forbid"` on write DTOs; no `role` / `bonus_balance` / `is_active` from clients
+- `/me/*` scoped to `require_user`; invalid `Authorization` is 401, not a guest
+- Auth rate limits + `Retry-After`; generic login errors; dummy hash if the user is missing
+- 152-ФЗ / GDPR: consent timestamp, export, erasure, minimization
+- Security headers (CSP, HSTS, `X-Frame-Options`, `Cache-Control: no-store` on auth/me)
+
+Do not commit `.vendor/cybersecurity-skills/`, `.env`, or tunnel credentials.

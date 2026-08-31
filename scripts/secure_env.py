@@ -274,7 +274,14 @@ def harden_env(
 
     web_lines: list[str] = []
     for line in text.splitlines():
-        if line.startswith(("ADMIN_USERNAME=", "ADMIN_PASSWORD=", "API_INTERNAL_URL=")):
+        if line.startswith(
+            (
+                "ADMIN_USERNAME=",
+                "ADMIN_PASSWORD=",
+                "API_INTERNAL_URL=",
+                "NEXT_PUBLIC_TELEGRAM_BOT_USERNAME=",
+            )
+        ):
             web_lines.append(line.split("#", 1)[0].rstrip())
     web_env = env_path.parent / "apps" / "web" / ".env.local"
     web_env.parent.mkdir(parents=True, exist_ok=True)

@@ -22,7 +22,7 @@ export default async function HomePage() {
       <section className="hero">
         <h1 className="hero-brand">White Shop</h1>
         <p>
-          Автоматическая витрина техники: цены из каналов поставщиков, медиана без наценки.
+          Автоматическая витрина техники: медиана предложений поставщиков и наценка магазина.
           Москва — самовывоз, регионы — СДЭК.
         </p>
         <div className="cta-row">

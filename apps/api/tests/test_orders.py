@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -7,6 +8,8 @@ from apps.api.schemas.order import OrderCreate
 from apps.api.services.orders import (
     apply_admin_status,
     cancel_order,
+    customer_status_notice,
+    manager_notice,
     mark_issued,
     validate_contacts,
     validate_delivery,
@@ -93,6 +96,37 @@ def test_cancel_and_issue() -> None:
     assert mark_issued(CustomerOrderStatus.ready) == CustomerOrderStatus.issued
 
 
+def test_customer_status_notice_skips_guest_and_noop() -> None:
+    assert (
+        customer_status_notice(
+            user_id=None,
+            number="WS-1",
+            previous=CustomerOrderStatus.placed,
+            new_status=CustomerOrderStatus.paid,
+        )
+        is None
+    )
+    notice = customer_status_notice(
+        user_id=uuid4(),
+        number="WS-1",
+        previous=CustomerOrderStatus.placed,
+        new_status=CustomerOrderStatus.paid,
+    )
+    assert notice is not None
+    assert "Оплачен" in notice.body
+
+
+def test_manager_notice_requires_cabinet() -> None:
+    assert manager_notice(user_id=None, number="WS-1", body="Завтра выдача") is None
+    user_id = uuid4()
+    note = manager_notice(user_id=user_id, number="WS-1", body="  Завтра выдача  ")
+    assert note is not None
+    assert note.kind == "manager"
+    assert note.user_id == user_id
+    assert note.body == "Завтра выдача"
+    assert "WS-1" in note.title
+
+
 def _order_payload(**overrides: object) -> dict:
     data: dict = {
         "customer_name": "Иван Иванов",
@@ -116,6 +150,27 @@ def test_order_requires_privacy_consent() -> None:
     del payload["privacy_consent"]
     try:
         OrderCreate.model_validate(payload)
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+
+
+def test_order_accepts_bonus_spend() -> None:
+    payload = OrderCreate.model_validate(_order_payload(bonus_spend="150.5"))
+    assert payload.bonus_spend == Decimal("150.50")
+
+
+def test_order_rejects_negative_bonus_spend() -> None:
+    try:
+        OrderCreate.model_validate(_order_payload(bonus_spend="-1"))
+        raise AssertionError("expected ValidationError")
+    except ValidationError:
+        pass
+
+
+def test_order_rejects_bonus_balance_mass_assignment() -> None:
+    try:
+        OrderCreate.model_validate(_order_payload(bonus_balance=999))
         raise AssertionError("expected ValidationError")
     except ValidationError:
         pass

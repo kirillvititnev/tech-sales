@@ -1,0 +1,21 @@
+from collections import defaultdict
+
+def unique_users_in_windows(id_list: list[int], k: int) -> list[int]:
+    n = len(id_list)
+    if k <= 0 or n == 0 or k > n:
+        return []
+    freq = defaultdict(int)
+    for x in id_list[:k]:
+        freq[x] += 1
+    result = [len(freq)]
+    for i in range(k, n):
+        left = id_list[i - k]
+        freq[left] -= 1
+        
+        if freq[left] == 0:
+            del freq[left]
+
+        freq[id_list[i]] += 1
+        result.append(len(freq))
+
+    return result

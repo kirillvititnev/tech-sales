@@ -7,11 +7,14 @@ from apps.api.models.order import AdminOrderStatus, DeliveryType
 
 
 class OrderItemIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     product_id: UUID
     quantity: int = Field(ge=1, le=100, default=1)
 
 
 class OrderCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     customer_name: str = Field(min_length=2, max_length=255)
     customer_phone: str = Field(min_length=10, max_length=32)
     customer_telegram: str | None = Field(default=None, max_length=128)
@@ -20,6 +23,7 @@ class OrderCreate(BaseModel):
     comment: str | None = Field(default=None, max_length=2000)
     telegram_init_data: str | None = Field(default=None, max_length=4096)
     privacy_consent: bool
+    bonus_spend: Decimal | None = Field(default=None, ge=0, le=1_000_000)
     items: list[OrderItemIn] = Field(min_length=1, max_length=50)
 
     @field_validator("privacy_consent")
@@ -55,6 +59,7 @@ class OrderOut(BaseModel):
     delivery_address: str | None = None
     comment: str | None = None
     total_amount: Decimal
+    bonus_spent: Decimal = Decimal("0")
     items: list[OrderItemOut] = []
     access_token: str | None = None
 
@@ -73,14 +78,33 @@ class AdminOrderOut(BaseModel):
     delivery_address: str | None = None
     comment: str | None = None
     total_amount: Decimal
+    bonus_spent: Decimal = Decimal("0")
     items: list[OrderItemOut] = []
 
 
 class AdminOrderStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     admin_status: AdminOrderStatus
 
 
 class AdminOrderAction(BaseModel):
     """issue | cancel"""
 
+    model_config = ConfigDict(extra="forbid")
+
     action: str = Field(pattern="^(issue|cancel)$")
+
+
+class AdminOrderMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("body")
+    @classmethod
+    def strip_body(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Нужно сообщение")
+        return cleaned

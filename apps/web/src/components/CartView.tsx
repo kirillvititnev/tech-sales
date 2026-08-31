@@ -12,7 +12,8 @@ export function CartView({
   checkoutHref?: string;
   catalogHref?: string;
 }) {
-  const { lines, total, ready, setQty, remove } = useCart();
+  const { lines, total, ready, setQty, remove, pricesSyncing, priceNote, pricePending } = useCart();
+  const blocked = pricesSyncing || pricePending.length > 0;
 
   if (!ready) {
     return (
@@ -38,7 +39,17 @@ export function CartView({
   return (
     <main className="section">
       <h2>Корзина</h2>
-      <p className="lead">Можно менять количество и оформить несколько позиций одним заказом.</p>
+      <p className="lead">
+        Цены на витрине — котировка. Количество можно менять. Оплату примет менеджер после
+        подтверждения.
+      </p>
+      {pricesSyncing ? (
+        <p className="lead">Сверяем цены с витриной…</p>
+      ) : priceNote ? (
+        <p className="lead" role="status">
+          {priceNote}
+        </p>
+      ) : null}
       <ul className="cart-lines">
         {lines.map((l) => (
           <li key={l.productId} className="cart-line">
@@ -74,9 +85,15 @@ export function CartView({
       </ul>
       <p className="checkout-price">Итого: {formatPrice(String(total))}</p>
       <div className="cta-row">
-        <Link href={checkoutHref} className="btn btn-primary">
-          Оформить заказ
-        </Link>
+        {blocked ? (
+          <button type="button" className="btn btn-primary" disabled>
+            {pricesSyncing ? "Сверяем цены…" : "Подтвердите изменение цены"}
+          </button>
+        ) : (
+          <Link href={checkoutHref} className="btn btn-primary">
+            Оформить заявку
+          </Link>
+        )}
         <Link href={catalogHref} className="btn btn-ghost">
           Продолжить покупки
         </Link>

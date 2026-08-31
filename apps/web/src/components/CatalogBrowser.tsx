@@ -408,7 +408,7 @@ export function CatalogBrowser({
 
       {productBasePath === "/product" ? (
         <p className="catalog-footnote">
-          Цены — медиана предложений поставщиков без наценки.{" "}
+          Цены — медиана предложений поставщиков плюс наценка магазина.{" "}
           <Link href="/hot">HOT</Link>
         </p>
       ) : null}

@@ -29,6 +29,16 @@ export type Product = {
   description?: string | null;
 };
 
+const MEDIA_PREFIX = "/api/v1/catalog/media/";
+
+export function productImageSrc(url: string | null | undefined): string | null {
+  if (!url || !url.startsWith(MEDIA_PREFIX)) return null;
+  const name = url.slice(MEDIA_PREFIX.length);
+  if (!/^[0-9a-f]{32}\.(jpg|png|webp)$/.test(name)) return null;
+  // Always same-origin so SSR and the browser match (Next rewrites `/api` → FastAPI).
+  return url;
+}
+
 export type Category = {
   id: string;
   slug: string;
@@ -80,6 +90,7 @@ export type CatalogQuery = {
   sort?: CatalogSort;
   limit?: number;
   offset?: number;
+  ids?: string[];
 };
 
 export type OrderItem = {
@@ -102,6 +113,7 @@ export type Order = {
   delivery_address?: string | null;
   comment?: string | null;
   total_amount: string;
+  bonus_spent?: string;
   items?: OrderItem[];
   access_token?: string | null;
 };
@@ -109,7 +121,13 @@ export type Order = {
 function buildCatalogParams(params?: CatalogQuery): URLSearchParams {
   const sp = new URLSearchParams();
   if (!params) {
-    sp.set("limit", "200");
+    sp.set("limit", "120");
+    return sp;
+  }
+  if (params.ids?.length) {
+    for (const id of params.ids.slice(0, 50)) {
+      sp.append("ids", id);
+    }
     return sp;
   }
   if (params.hot) sp.set("hot", "true");
@@ -120,7 +138,7 @@ function buildCatalogParams(params?: CatalogQuery): URLSearchParams {
   if (params.min_price != null) sp.set("min_price", String(params.min_price));
   if (params.max_price != null) sp.set("max_price", String(params.max_price));
   if (params.sort) sp.set("sort", params.sort);
-  sp.set("limit", String(params.limit ?? 200));
+  sp.set("limit", String(params.limit ?? 120));
   if (params.offset) sp.set("offset", String(params.offset));
   return sp;
 }
@@ -152,6 +170,18 @@ async function apiGetLive<T>(path: string): Promise<T> {
     throw new Error(`API ${res.status}: ${path}`);
   }
   return res.json() as Promise<T>;
+}
+
+export function apiErrorMessage(data: unknown, fallback: string): string {
+  if (typeof data === "object" && data !== null && "detail" in data) {
+    const detail = (data as { detail: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail) && detail[0] && typeof detail[0] === "object" && detail[0] !== null) {
+      const first = detail[0] as { msg?: unknown };
+      if (typeof first.msg === "string" && first.msg.trim()) return first.msg;
+    }
+  }
+  return fallback;
 }
 
 export function formatPrice(price: string | null): string {
@@ -196,10 +226,11 @@ export const api = {
   product: (slug: string) => apiGet<Product>(`/api/v1/catalog/products/${slug}`),
   categories: () => apiGet<Category[]>("/api/v1/catalog/categories"),
   orderByNumber: (number: string, access: string) =>
-    apiGet<Order>(
-      `/api/v1/orders/by-number/${encodeURIComponent(number)}?access=${encodeURIComponent(access)}`,
-      { next: { revalidate: 0 }, cache: "no-store" },
-    ),
+    apiGet<Order>(`/api/v1/orders/by-number/${encodeURIComponent(number)}`, {
+      next: { revalidate: 0 },
+      cache: "no-store",
+      headers: { "X-Order-Access": access },
+    }),
   adminOrders: () =>
     apiGet<Order[]>("/api/v1/admin/orders", {
       next: { revalidate: 0 },

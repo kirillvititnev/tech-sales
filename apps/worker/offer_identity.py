@@ -133,7 +133,7 @@ NON_APPLE_PHONE_RE = re.compile(
     r"samsung|galaxy|oneplus|one\s*plus|xiaomi|redmi|poco|honor|huawei|"
     r"nothing(?:\s*phone)?|pixel|realme|oppo|vivo|motorola|moto|iqoo|tecno|"
     r"infinix|asus|nokia|"
-    r"z\s*fold|z\s*flip|tab\s*s\d|sm-[a-z0-9]+"
+    r"z\s*fold|z\s*flip|tab\s*s\d+|galaxy\s*tab|\btab\b|sm-[a-z0-9]+"
     r")\b",
 )
 
@@ -181,6 +181,8 @@ COLOR_ALIASES = {
     "ultramarine": "Ultramarine",
     "starlight": "Starlight",
     "midnight": "Midnight",
+    "grey": "Gray",
+    "gray": "Gray",
     "blush": "Blush",
     "indigo": "Indigo",
     "citrus": "Citrus",
@@ -239,8 +241,13 @@ COLOR_ALIASES = {
     # Samsung A-series OEM
     "awesome lime": "Awesome Lime",
     "lime": "Lime",
-    # Pixel 7a OEM
+    # Pixel 7a / Galaxy Tab OEM
     "coral": "Coral",
+    "coralred": "Coral",
+    "coraled": "Coral",
+    "coral red": "Coral",
+    "coral pink": "Coral",
+    "coralpink": "Coral",
     # Bang & Olufsen / Bowers & Wilkins OEM finishes
     "chestnut": "Chestnut",
     "anthracite": "Anthracite",
@@ -256,6 +263,14 @@ COLOR_ALIASES = {
     "blush gold": "Blush Gold",
     "graphite black": "Graphite Black",
     "orange ocean": "Orange Ocean",
+    "blueblack": "Blueblack",
+    "blue black": "Blueblack",
+    "iceblue": "Iceblue",
+    "ice blue": "Iceblue",
+    "whitesilver": "Whitesilver",
+    "white silver": "Whitesilver",
+    "bay": "Bay",
+    "cyan": "Cyan",
 }
 
 # Multi-word colors first (Deep Blue must not collapse to Blue)
@@ -274,6 +289,7 @@ COLOR_MULTI_RE = re.compile(
     r"awesome\s+lime|dark\s+forest|royal\s+burgundy|"
     r"storm\s+gr[ae]y|zen\s+green|glacier\s+blue|"
     r"blaze\s+purple|blush\s+gold|graphite\s+black|orange\s+ocean|"
+    r"blue\s*black|ice\s*blue|white\s*silver|"
     r"black\s+titanium|natural\s+titanium|white\s+titanium|desert\s+titanium|"
     r"blue\s+titanium|"
     r"titanium\s+black|titanium\s+gr[ae]y|"
@@ -288,7 +304,7 @@ COLOR_SINGLE_RE = re.compile(
     r"gray|grey|violet|lavender|teal|orange|cream|obsidian|blush|indigo|citrus|camo|"
     r"olive|graphite|porcelain|terracotta|beige|brown|lilac|charcoal|graygreen|"
     r"jetblack|pistachio|sandstorm|sand|squad|funky|mustard|sandstone|tan|"
-    r"coral|chestnut|anthracite|lime"
+    r"coral|chestnut|anthracite|lime|bay|cyan|blueblack|iceblue|whitesilver"
     r")\b",
 )
 
@@ -458,6 +474,7 @@ JUNK_RE = re.compile(
     r"\bб/?у\b|"
     r"\bused\b|"
     r"\bвитрин|"
+    r"\bуценк|"
     r"\bрассрочк|"
     r"\bпредзаказ\b|"
     r"\bпод\s*заказ\b|"
@@ -730,6 +747,9 @@ def asis_tier(title: str) -> str | None:
     """Return 'asis+' | 'asis' | None."""
     if re.search(r"(?i)asis\+", title):
         return "asis+"
+    # iPro / suppliers: «запак» = ASIS+ (opened / reboxed)
+    if re.search(r"(?i)\bзапак", title):
+        return "asis+"
     if ASIS_RE.search(title):
         return "asis"
     return None
@@ -743,8 +763,18 @@ def category_for_phone(*, asis_tier_name: str | None) -> str:
     return "Смартфоны"
 
 
+def category_for_headphones(*, asis_tier_name: str | None) -> str:
+    if asis_tier_name == "asis+":
+        return "Наушники ASIS+"
+    if asis_tier_name == "asis":
+        return "Наушники ASIS"
+    return "Наушники"
+
+
 def normalize_iphone_model(title: str) -> str | None:
     """Resolve iPhone model. Bare 'Air' / '14:00' / Android '16/512' must NEVER become iPhone."""
+    if re.search(r"(?i)\bipad\b", title):
+        return None
     if NON_APPLE_PHONE_RE.search(title) and not re.search(r"\biphone\b", title, re.I):
         return None
 
@@ -991,6 +1021,26 @@ def normalize_17e_color(model: str, color: str) -> str:
     return ""
 
 
+def normalize_starlight_white_color(model: str, color: str) -> str:
+    """iPhone 13/14 (+ mini/Plus) and SE 3rd: official finish is Starlight, not White.
+
+    Suppliers often list White for the same SKU — collapse to Starlight so
+    storefront cards do not duplicate.
+    """
+    if not color:
+        return color
+    key = re.sub(r"\s+", " ", color.lower()).strip()
+    if key != "white":
+        return color
+    m = model.lower().strip()
+    gen = _generation(m)
+    if gen in {13, 14} and "pro" not in m:
+        return "Starlight"
+    if m in {"iphone se", "iphone se 2022", "iphone se 3", "iphone se 3rd"}:
+        return "Starlight"
+    return color
+
+
 def normalize_base_17_color(model: str, color: str) -> str:
     """iPhone 17 (non-Pro) official: Black, White, Mist Blue, Sage, Lavender."""
     if not color or model.lower() != "iphone 17":
@@ -1125,6 +1175,9 @@ def parse_apple_watch(title: str) -> tuple[str, str, str, str] | None:
     # Never claim Galaxy Watch Ultra / Samsung watches as Apple
     if re.search(r"(?i)\bgalaxy\b", title) and re.search(r"(?i)\bwatch\b", title):
         return None
+    # Galaxy Tab S10 / Tab S9 must not become Apple Watch S10
+    if re.search(r"(?i)\b(?:galaxy\s+)?tab\b|\bsm-x\d+", title):
+        return None
     band = ""
     raw_title = title.strip()
     band_m = WATCH_BAND_RE.search(raw_title)
@@ -1155,6 +1208,17 @@ def parse_apple_watch(title: str) -> tuple[str, str, str, str] | None:
         if case_color and "titanium" not in case_color.lower():
             if case_color.lower() in {"black", "natural"}:
                 case_color = f"{case_color.title()} Titanium"
+        # clean_offer_title may collapse "BLACK Black Alpine…" → band eats the case word
+        if not case_color and band:
+            peel = re.match(
+                r"(?i)^(black|natural)(?:\s*ti(?:tanium)?)?\s+(.+)$",
+                band.strip(),
+            )
+            if peel:
+                case_color = expand_watch_ti(peel.group(1))
+                if "titanium" not in case_color.lower():
+                    case_color = f"{case_color.title()} Titanium"
+                band = peel.group(2).strip()
         return device_name, model_key, case_color, band
 
     sm = re.search(
@@ -1189,7 +1253,8 @@ def parse_apple_watch(title: str) -> tuple[str, str, str, str] | None:
         return device_name, model_key, case_color, band
 
     if re.search(r"(?i)\b(apple\s*watch|watch\s*ultra)\b", title):
-        return "Apple Watch", "apple watch", extract_color(title), band
+        # Bare "Apple Watch · Starlight" without series/size — not a publishable SKU
+        return None
     return None
 
 
@@ -1980,6 +2045,9 @@ def parse_android(title: str) -> tuple[str, str, str, str, str, str] | None:
             "blush gold": "Blush Gold",
             "graphite black": "Graphite Black",
             "orange ocean": "Orange Ocean",
+            "bay": "Bay",
+            "cyan": "Cyan",
+            "lake cyan": "Lake Cyan",
         }
         for alias, finish in android_color_map.items():
             if alias in {"lemongrass", "snow", "hazel"} and brand != "Google":
@@ -2366,6 +2434,91 @@ def scrub_spec_leaks(text: str) -> str:
     return out
 
 
+def parse_galaxy_tab(title: str) -> tuple[str, str, str, str, str, str] | None:
+    """Return (brand, category, device_name, model_key, color, storage) or None.
+
+    Galaxy Tab S10 Lite etc. must never become Apple Watch S10.
+    Identity keeps series + variant + connectivity (Wi-Fi / 5G); OEM codes stripped.
+    """
+    raw = strip_emoji(re.sub(r"\s+", " ", title.strip()))
+    if not re.search(r"(?i)\b(?:galaxy\s+)?tab\b|\bsm-x\d+", raw):
+        return None
+    color = extract_color(raw)
+    if color.lower() == "grey":
+        color = "Gray"
+    storage = extract_storage(raw)
+    if not storage:
+        return None
+
+    series_m = re.search(
+        r"(?i)\btab\s*s\s*(?P<num>\d+)\s*(?P<var>lite|fe(?:\s*\+|\s*plus)?|plus|ultra)?",
+        raw,
+    )
+    if not series_m:
+        # Fallback: keep legacy soft parse for odd titles
+        t = re.sub(r"(?i)\bsamsung\b", " ", raw)
+        t = re.sub(r"(?i)\bgalaxy\b", "Galaxy", t)
+        t = re.sub(r"(?i)\btab\s*s\s*(\d+)", r"Tab S\1", t)
+        t = re.sub(r"(?i)\btab\b", "Tab", t)
+        t = re.sub(r"(?i)\blite\b", "Lite", t)
+        t = re.sub(r"(?i)\bfe\b", "FE", t)
+        t = re.sub(r"(?i)\bultra\b", "Ultra", t)
+        t = re.sub(r"(?i)\bplus\b", "Plus", t)
+        if color:
+            t = re.sub(rf"(?i)\b{re.escape(color)}\b", " ", t)
+        t = re.sub(r"(?i)\b(?:coralred|coraled|coralpink|coral|grey|gray)\b", " ", t)
+        t = re.sub(r"(?i)\b(?:sm-)?x\d+\w*\b", " ", t)
+        t = RAM_STORAGE_RE.sub(" ", t)
+        t = STORAGE_RE.sub(" ", t)
+        t = re.sub(r"(?i)\b(?:wi[\s\-]?fi|5g|lte)\b", " ", t)
+        t = re.sub(r"\s+", " ", t).strip(" -–—/")
+        t = collapse_duplicate_tokens(t)
+        if not re.search(r"(?i)\bgalaxy\b", t):
+            t = f"Galaxy {t}"
+        return "Samsung", "Планшеты", t, t.lower(), color or "", storage
+
+    num = series_m.group("num")
+    var_raw = (series_m.group("var") or "").strip().lower()
+    if var_raw in {"fe+", "fe plus", "feplus"}:
+        variant = "FE+"
+    elif var_raw == "fe":
+        variant = "FE"
+    elif var_raw == "lite":
+        variant = "Lite"
+    elif var_raw == "plus":
+        variant = "Plus"
+    elif var_raw == "ultra":
+        variant = "Ultra"
+    else:
+        variant = ""
+
+    code_m = re.search(r"(?i)\b(?:sm-)?x(?P<code>\d{3,4})\w*\b", raw)
+    code = (code_m.group("code") if code_m else "").upper()
+
+    has_wifi = bool(re.search(r"(?i)\bwi[\s\-]?fi\b", raw))
+    has_cell = bool(re.search(r"(?i)\b(5g|lte|cellular)\b", raw))
+    # Samsung tablet codes: …0 Wi-Fi, …6 cellular (X930/X936, X730/X736, …)
+    if code:
+        if code.endswith("6"):
+            has_cell = True
+        elif code.endswith("0"):
+            has_wifi = True
+
+    connectivity = ""
+    if has_cell:
+        connectivity = "5G"
+    elif has_wifi:
+        connectivity = "Wi-Fi"
+
+    parts = ["Galaxy", "Tab", f"S{num}"]
+    if variant:
+        parts.append(variant)
+    if connectivity:
+        parts.append(connectivity)
+    device_name = " ".join(parts)
+    return "Samsung", "Планшеты", device_name, device_name.lower(), color or "", storage
+
+
 def parse_galaxy_ring(title: str) -> tuple[str, str, str, str, str] | None:
     """Return (device_name, model_key, color, size, model_code) or None.
 
@@ -2448,7 +2601,7 @@ def parse_audio(title: str) -> tuple[str, str, str, str, str] | None:
     elif re.search(r"(?i)\bone\s*plus\b|\boneplus\b", raw) and re.search(r"(?i)\bbuds\b", raw):
         brand = "OnePlus"
         brand_re = r"one\s*plus|oneplus"
-    elif re.search(r"(?i)\bjbl\b", raw):
+    elif re.search(r"(?i)\bjbl\b", raw) or re.search(r"(?i)\bpartybox\b", raw):
         brand = "JBL"
         brand_re = r"jbl"
     elif re.search(r"(?i)\bmarshall\b", raw):
@@ -2605,8 +2758,11 @@ def parse_camera(title: str) -> tuple[str, str, str, str, str, str] | None:
         device_name = t
         return "Fujifilm", "Фото", device_name, device_name.lower(), color or "", ""
 
-    # --- DJI Osmo ---
-    if re.search(r"(?i)\bdji\b", raw) and re.search(r"(?i)\bosmo\b", raw):
+    # --- DJI Osmo (brand optional: suppliers often write bare "Osmo Mobile 7") ---
+    if re.search(r"(?i)\bosmo\b", raw) and (
+        re.search(r"(?i)\bdji\b", raw)
+        or re.search(r"(?i)\bosmo\s+(?:mobile|pocket|action|nano)\b", raw)
+    ):
         color = extract_color(raw)
         extra = ""
         cm = re.search(r"\(([^)]+)\)", raw)
@@ -2620,7 +2776,10 @@ def parse_camera(title: str) -> tuple[str, str, str, str, str, str] | None:
         t = re.sub(r"(?i)\bosmo\s+action\s+(\d+)\b", r"Osmo Action \1", t)
         t = re.sub(r"(?i)\bosmo\s+pocket\s+(\d+)\b", r"Osmo Pocket \1", t)
         t = re.sub(r"(?i)\bosmo\s+(\d+)\s+pocket\b", r"Osmo Pocket \1", t)
+        t = re.sub(r"(?i)\bmobile\s*(\d+)\s*p?\b", r"Mobile \1", t)
         t = re.sub(r"(?i)\bmobile\b", "Mobile", t)
+        t = re.sub(r"(?i)\bcreator\s*combo\b", "Creator Combo", t)
+        t = re.sub(r"(?i)\btracker\b", "Tracker", t)
         if color:
             t = re.sub(rf"(?i)\b{re.escape(color)}\b", " ", t)
         t = re.sub(r"\s+", " ", t).strip(" -–—/")
@@ -2628,6 +2787,25 @@ def parse_camera(title: str) -> tuple[str, str, str, str, str, str] | None:
         if not t.lower().startswith("dji"):
             t = f"DJI {t}"
         return "DJI", "Экшн-камеры", t, t.lower(), color or "", extra
+
+    # --- DJI Mic (Mini 2 / Mic 3 kits) ---
+    if re.search(r"(?i)\bdji\b", raw) and re.search(r"(?i)\bmic\b", raw):
+        extra = ""
+        cm = re.search(r"\(([^)]+)\)", raw)
+        if cm:
+            extra = cm.group(1).strip()
+            raw = (raw[: cm.start()] + " " + raw[cm.end() :]).strip()
+        t = re.sub(r"(?i)\bdji\b", "DJI", raw)
+        t = re.sub(r"(?i)\bmic\s*mini\b", "Mic Mini", t)
+        t = re.sub(r"(?i)\bmic\b", "Mic", t)
+        t = re.sub(r"(?i)\btransmitter\b", "Transmitter", t)
+        t = re.sub(r"(?i)\bmicrophone\b", "Microphone", t)
+        t = re.sub(r"[‼️!]+", " ", t)
+        t = re.sub(r"\s+", " ", t).strip(" -–—/")
+        t = collapse_duplicate_tokens(t)
+        if not t.lower().startswith("dji"):
+            t = f"DJI {t}"
+        return "DJI", "Аксессуары", t, t.lower(), "", extra
 
     # --- GoPro Hero ---
     if re.search(r"(?i)\bgopro\b", raw):
@@ -2697,7 +2875,7 @@ _INSTA360_BODY = (
     r"one\s*rs|one\s*x\s*2|one\s*x2|"
     r"mic\s*air|mic|"
     r"link\s*2|link|"
-    r"x\s*[2-5]|"
+    r"x\s*[2-6]|"
     r"flow|sphere"
 )
 
@@ -2708,7 +2886,7 @@ INSTA360_RE = re.compile(
 
 def _format_insta360_body(body: str) -> str:
     b = re.sub(r"\s+", " ", body.strip().lower())
-    b = re.sub(r"^x\s*([2-5])$", r"X\1", b)
+    b = re.sub(r"^x\s*([2-6])$", r"X\1", b)
     mapping = {
         "luna ultra": "Luna Ultra",
         "ace pro 2": "Ace Pro 2",
@@ -2738,8 +2916,8 @@ def _format_insta360_body(body: str) -> str:
 def parse_insta360(title: str) -> tuple[str, str, str, str, str, str] | None:
     """Return (brand, category, device_name, model_key, color, extra) or None."""
     raw = re.sub(r"\s+", " ", title.strip())
-    # Glued supplier forms: "360x5" / "insta360x5"
-    raw = re.sub(r"(?i)(360)\s*(x\s*[2-5])", r"\1 \2", raw)
+    # Glued supplier forms: "360x5" / "insta360x5" / X6
+    raw = re.sub(r"(?i)(360)\s*(x\s*[2-6])", r"\1 \2", raw)
     raw = re.sub(r"(?i)\binsta360(?=x)", "Insta360 ", raw)
     extra = ""
     pm = re.search(r"\(([^)]+)\)", raw)
@@ -2762,6 +2940,62 @@ def parse_insta360(title: str) -> tuple[str, str, str, str, str, str] | None:
             color = "Stellar White"
     category = "Аксессуары" if model_part.lower().startswith(("mic", "link", "flow")) else "Экшн-камеры"
     return "Insta360", category, device_name, device_name.lower(), color or "", extra
+
+
+def is_airpods_spare_part(title: str) -> bool:
+    """Single ear / L/R spare parts must never reach the storefront."""
+    if not re.search(r"(?i)\bairpods?\b", title):
+        return False
+    if re.search(r"(?i)\b(ухо|уш[аи]|левое|правое|left|right)\b", title):
+        return True
+    # Lone L/R token: "AirPods Pro 2 L", "AirPods 4 R ANC"
+    if re.search(r"(?i)(?:^|[\s·|/])([LR])(?:[\s·|/]|$)", title):
+        return True
+    return False
+
+
+def parse_airpods(title: str) -> tuple[str, str, str, str] | None:
+    """Return (brand, category, device_name, model_key) or None.
+
+    AirPods 4 aliases:
+      - без шумодава → AirPods 4
+      - ANC / шумодав / шумоподавление → AirPods 4 ANC
+    Max line is handled by parse_airpods_max.
+    """
+    raw = strip_emoji(re.sub(r"\s+", " ", title.strip()))
+    if not re.search(r"(?i)\bairpods?\b", raw):
+        return None
+    if re.search(r"(?i)\bairpods?\s*max\b", raw):
+        return None
+
+    if re.search(r"(?i)\bpro\s*3\b", raw):
+        device_name = "AirPods Pro 3"
+    elif re.search(r"(?i)\bpro\s*2\b", raw):
+        device_name = "AirPods Pro 2"
+    elif re.search(r"(?i)\bpro\b", raw):
+        device_name = "AirPods Pro"
+    elif re.search(r"(?i)\bairpods?\s*4\b|\b4\s*(?:anc|без|с\s*шумо)", raw) or re.search(
+        r"(?i)\bairpods?\b.*\b4\b|\b4\b.*\bairpods?\b", raw
+    ):
+        explicit_no_anc = bool(re.search(r"(?i)без\s*шумо", raw))
+        has_anc = bool(
+            re.search(r"(?i)\banc\b|шумодав|шумоподав", raw)
+        )
+        if explicit_no_anc:
+            device_name = "AirPods 4"
+        elif has_anc:
+            device_name = "AirPods 4 ANC"
+        else:
+            device_name = "AirPods 4"
+    elif re.search(r"(?i)\bairpods?\s*3\b", raw):
+        device_name = "AirPods 3"
+    elif re.search(r"(?i)\bairpods?\s*2\b", raw):
+        device_name = "AirPods 2"
+    else:
+        # Bare "AirPods" without generation — not specific enough
+        return None
+
+    return "Apple", "Наушники", device_name, device_name.lower()
 
 
 def parse_airpods_max(title: str) -> tuple[str, str, str, str, str] | None:
@@ -2876,6 +3110,8 @@ def parse_airpods_max(title: str) -> tuple[str, str, str, str, str] | None:
 def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
     section = normalize_section_header(section) or None
     working = strip_part_marker(title.strip())
+    # Cyrillic lookalike «е» in Latin color tokens (Orangе → Orange)
+    working = re.sub(r"(?i)orang\u0435", "Orange", working)
     working = re.sub(r"(?i)\bновые\b", " ", working)
     working = re.sub(r"\s+", " ", working).strip()
     if should_prepend_section(section, working):
@@ -2891,6 +3127,14 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
     if is_junk_offer(working):
         cleaned = clean_offer_title(working)
         return _rejected(model=cleaned[:80].lower(), display_title=cleaned or working, reject_reason="junk_or_noise")
+
+    if is_airpods_spare_part(working) or is_airpods_spare_part(title):
+        cleaned = clean_offer_title(working)
+        return _rejected(
+            model=cleaned[:80].lower(),
+            display_title=cleaned or working,
+            reject_reason="airpods_spare_part",
+        )
 
     if is_marketing_noise(working):
         return _rejected(
@@ -2954,6 +3198,7 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
     watch = parse_apple_watch(working) or parse_apple_watch(title)
     galaxy_buds = parse_galaxy_buds(working) or parse_galaxy_buds(title)
     galaxy_watch = parse_galaxy_watch(working) or parse_galaxy_watch(title)
+    galaxy_tab = parse_galaxy_tab(working) or parse_galaxy_tab(title)
     galaxy_ring = parse_galaxy_ring(working) or parse_galaxy_ring(title)
     sony = (
         parse_sony_ps5(working)
@@ -3006,6 +3251,13 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
         or parse_airpods_max(title)
         or (parse_airpods_max(f"{section} {working}") if section else None)
     )
+    airpods = None
+    if not airpods_max:
+        airpods = (
+            parse_airpods(working)
+            or parse_airpods(title)
+            or (parse_airpods(f"{section} {working}") if section else None)
+        )
 
     extra = ""
     ring_model_code = ""
@@ -3073,6 +3325,22 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
                 display_title=device_name,
                 reject_reason="samsung_missing_color",
             )
+    elif galaxy_tab:
+        kind = OfferKind.samsung
+        brand, device_category, device_name, model, tab_color, storage = galaxy_tab
+        if tab_color:
+            color = tab_color
+        ram = ""
+        sim = None
+        if not color:
+            return _rejected(
+                kind=kind,
+                model=model,
+                storage=storage,
+                color="",
+                display_title=device_name,
+                reject_reason="samsung_missing_color",
+            )
     elif galaxy_ring:
         kind = OfferKind.samsung
         brand = "Samsung"
@@ -3104,6 +3372,7 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
         color = normalize_air_color(model, color)
         color = normalize_17e_color(model, color)
         color = normalize_base_17_color(model, color)
+        color = normalize_starlight_white_color(model, color)
         if not storage:
             return _rejected(
                 kind=kind,
@@ -3153,6 +3422,9 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
         device_name, model, watch_color, band = watch
         # Never keep extract_color from the band (e.g. White Ocean Band → White).
         color = watch_color
+        # Phone/tablet RAM·storage must never stick to watch identities
+        storage = ""
+        ram = ""
         if device_name.startswith("Apple Watch Ultra"):
             if not color:
                 return _rejected(
@@ -3173,6 +3445,28 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
                         device_name, build_config(color=color, band=band)
                     ),
                     reject_reason="watch_invalid_case_color",
+                )
+        else:
+            # Series / SE: require case size (mm) and case color for storefront
+            if not re.search(r"(?i)\b\d{2}\s*mm\b", device_name):
+                return _rejected(
+                    kind=kind,
+                    model=model,
+                    color=color,
+                    display_title=build_display_title(
+                        device_name, build_config(color=color, band=band)
+                    ),
+                    reject_reason="watch_missing_size",
+                )
+            if not color:
+                return _rejected(
+                    kind=kind,
+                    model=model,
+                    color="",
+                    display_title=build_display_title(
+                        device_name, build_config(band=band)
+                    ),
+                    reject_reason="watch_missing_case_color",
                 )
     elif sony:
         kind = OfferKind.sony
@@ -3272,8 +3566,17 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
     elif airpods_max:
         kind = OfferKind.apple_other
         brand, device_category, device_name, model, max_color = airpods_max
+        device_category = category_for_headphones(asis_tier_name=asis_kind)
         if max_color:
             color = max_color
+        storage = ""
+        ram = ""
+        sim = None
+    elif airpods:
+        kind = OfferKind.apple_other
+        brand, device_category, device_name, model = airpods
+        device_category = category_for_headphones(asis_tier_name=asis_kind)
+        color = ""
         storage = ""
         ram = ""
         sim = None
@@ -3287,8 +3590,17 @@ def classify_offer(title: str, *, section: str | None = None) -> OfferIdentity:
             reject_reason="airpods_max_missing_generation",
         )
     elif other:
-        kind = OfferKind.apple_other
         token = other.group(0)
+        # Incomplete watch lines must not publish via the generic Apple-other path
+        if re.search(r"(?i)(?:apple\s*watch|watch\s*ultra)", token):
+            return _rejected(
+                kind=OfferKind.apple_other,
+                model="apple watch",
+                color=color,
+                display_title=clean_offer_title(working) or working,
+                reject_reason="watch_incomplete",
+            )
+        kind = OfferKind.apple_other
         brand, device_category, device_name, model = _apple_other_device_name(token, working)
     elif macbook_bare:
         kind = OfferKind.apple_other

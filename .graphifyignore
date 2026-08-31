@@ -1,0 +1,4 @@
+# Cursor config + project skills — keep out of the product graph.
+# Security allowlist lives under .cursor/skills/; full cyber dump is in .vendor/.
+.cursor/
+.vendor/

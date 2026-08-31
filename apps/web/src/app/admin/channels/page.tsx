@@ -14,6 +14,7 @@ type Channel = {
   status: string;
   last_parsed_at: string | null;
   last_error: string | null;
+  counts_toward_price: boolean;
 };
 
 const STATUS_RU: Record<string, string> = {
@@ -22,16 +23,35 @@ const STATUS_RU: Record<string, string> = {
   error: "Ошибка",
 };
 
+function formatSyncStats(stats: Record<string, unknown> | null): string | null {
+  if (!stats) return null;
+  const folder = typeof stats.folder === "string" ? stats.folder : null;
+  const finished = typeof stats.finished_at === "string" ? stats.finished_at : null;
+  if (!folder && !finished) return null;
+  const when = finished ? new Date(finished).toLocaleString("ru-RU") : "—";
+  const products = typeof stats.products === "number" ? stats.products : 0;
+  const quarantined = typeof stats.quarantined === "number" ? stats.quarantined : 0;
+  return `последний синк: ${folder ?? "каталог"} · ${when} · карточек ${products} · отброшено ${quarantined}`;
+}
+
 export default function AdminChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [syncBlurb, setSyncBlurb] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   async function load() {
     try {
-      const res = await adminFetch(`${API_URL}/api/v1/admin/channels`);
-      if (!res.ok) throw new Error("fail");
-      setChannels(await res.json());
+      const [channelRes, settingsRes] = await Promise.all([
+        adminFetch(`${API_URL}/api/v1/admin/channels`),
+        adminFetch(`${API_URL}/api/v1/admin/settings`),
+      ]);
+      if (!channelRes.ok) throw new Error("fail");
+      setChannels(await channelRes.json());
+      if (settingsRes.ok) {
+        const settings = await settingsRes.json();
+        setSyncBlurb(formatSyncStats(settings.last_sync_stats ?? null));
+      }
       setError(null);
     } catch {
       setError("Не удалось загрузить каналы");
@@ -42,12 +62,15 @@ export default function AdminChannelsPage() {
     void load();
   }, []);
 
-  async function setStatus(id: string, status: string) {
+  async function patchChannel(
+    id: string,
+    body: { status: string; counts_toward_price?: boolean },
+  ) {
     setBusy(id);
     try {
       const res = await adminFetch(`${API_URL}/api/v1/admin/channels/${id}/status`, {
         method: "PATCH",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -56,6 +79,7 @@ export default function AdminChannelsPage() {
       }
       const updated = await res.json();
       setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, ...updated } : c)));
+      setError(null);
     } catch {
       setError("Сеть недоступна");
     } finally {
@@ -67,13 +91,19 @@ export default function AdminChannelsPage() {
     <main className="section">
       <h2>Каналы</h2>
       <p className="lead">Поставщики Telegram: статус, последняя синхронизация, ошибки.</p>
-      {error ? <p className="form-error">{error}</p> : null}
+      {syncBlurb ? <p className="account-note">{syncBlurb}</p> : null}
+      {error ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       <table className="admin-table">
         <thead>
           <tr>
             <th>Канал</th>
             <th>Папка</th>
             <th>Статус</th>
+            <th>Медиана</th>
             <th>Парсинг</th>
             <th>Ошибка</th>
             <th></th>
@@ -82,7 +112,7 @@ export default function AdminChannelsPage() {
         <tbody>
           {channels.length === 0 ? (
             <tr>
-              <td colSpan={6}>Каналов нет — запустите `make sync-apple`</td>
+              <td colSpan={7}>Каналов нет — запустите `make sync-apple`</td>
             </tr>
           ) : (
             channels.map((c) => (
@@ -94,6 +124,7 @@ export default function AdminChannelsPage() {
                 </td>
                 <td>{c.folder_label ?? "—"}</td>
                 <td>{STATUS_RU[c.status] ?? c.status}</td>
+                <td>{c.counts_toward_price === false ? "не кормить" : "в медиане"}</td>
                 <td>{c.last_parsed_at ? new Date(c.last_parsed_at).toLocaleString("ru-RU") : "—"}</td>
                 <td style={{ maxWidth: 220, fontSize: "0.85rem", color: "var(--mute)" }}>
                   {c.last_error ?? "—"}
@@ -105,7 +136,7 @@ export default function AdminChannelsPage() {
                         type="button"
                         className="btn btn-ghost admin-btn"
                         disabled={busy === c.id}
-                        onClick={() => setStatus(c.id, "paused")}
+                        onClick={() => void patchChannel(c.id, { status: "paused" })}
                       >
                         Пауза
                       </button>
@@ -115,11 +146,24 @@ export default function AdminChannelsPage() {
                         type="button"
                         className="btn btn-ghost admin-btn"
                         disabled={busy === c.id}
-                        onClick={() => setStatus(c.id, "active")}
+                        onClick={() => void patchChannel(c.id, { status: "active" })}
                       >
                         Вкл
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      className="btn btn-ghost admin-btn"
+                      disabled={busy === c.id}
+                      onClick={() =>
+                        void patchChannel(c.id, {
+                          status: c.status,
+                          counts_toward_price: c.counts_toward_price === false,
+                        })
+                      }
+                    >
+                      {c.counts_toward_price === false ? "В медиане" : "Не кормить медиану"}
+                    </button>
                   </div>
                 </td>
               </tr>

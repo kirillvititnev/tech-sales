@@ -58,6 +58,21 @@ def test_iphone_air_shorthand_and_colors() -> None:
         assert ident.config == config, (title, ident.config)
 
 
+def test_iphone_13_white_collapses_to_starlight() -> None:
+    """OEM often writes White for iPhone 13/14 Starlight."""
+    star = classify_offer("🇮🇳 13 128GB Starlight (Sim + E-Sim)")
+    white = classify_offer("🇮🇳 13 128GB White (Sim + E-Sim)")
+    assert star.publish and white.publish
+    assert star.color == "Starlight"
+    assert white.color == "Starlight"
+    assert star.identity_key == white.identity_key
+    assert "White" not in white.display_title
+    # iPhone 16 officially has White — do not remap
+    sixteen = classify_offer("🇮🇳 16 128GB White (Sim + E-Sim)")
+    assert sixteen.publish
+    assert sixteen.color == "White"
+
+
 def test_iphone_17e_name_and_soft_pink() -> None:
     ident = classify_offer("🇺🇸 eSim 17e 512GB Pink")
     assert ident.publish is True
@@ -246,7 +261,68 @@ def test_structured_airpods() -> None:
     assert ident.publish is True
     assert ident.brand == "Apple"
     assert ident.device_category == "Наушники"
-    assert "AirPods" in ident.device_name
+    assert ident.device_name == "AirPods 4 ANC"
+    assert ident.model == "airpods 4 anc"
+
+
+def test_airpods_4_anc_aliases_and_zapak_asis() -> None:
+    """без шумодава → 4; шумодав/шумоподавление → 4 ANC; запак → ASIS+."""
+    base = classify_offer("AirPods 4")
+    no_anc = classify_offer("AirPods 4 без шумодава")
+    assert base.publish and no_anc.publish
+    assert base.identity_key == no_anc.identity_key
+    assert base.device_name == "AirPods 4"
+
+    anc = classify_offer("AirPods 4 ANC")
+    for title in (
+        "AirPods 4 с шумодавом",
+        "AirPods 4 с шумоподавлением",
+        "AirPods 4 ANC с шумодавом",
+    ):
+        ident = classify_offer(title)
+        assert ident.publish is True, title
+        assert ident.device_name == "AirPods 4 ANC", title
+        assert ident.identity_key == anc.identity_key, title
+
+    zapak = classify_offer("AirPods 4 ANC запак")
+    assert zapak.publish is True
+    assert zapak.device_name == "AirPods 4 ANC"
+    assert zapak.device_category == "Наушники ASIS+"
+    assert zapak.identity_key != anc.identity_key
+
+
+def test_airpods_discount_and_spare_parts_rejected() -> None:
+    for title in (
+        "AirPods Pro 2 уценка",
+        "AirPods Pro 2 Уценка",
+        "AirPods 4 ANC Уценка",
+        "AirPods 4 ANC Левое ухо",
+        "AirPods 4 ANC Ухо L",
+        "AirPods 4 R ANC",
+        "AirPods Pro 2 L",
+    ):
+        ident = classify_offer(title)
+        assert ident.publish is False, title
+
+
+def test_apple_watch_requires_size_and_color() -> None:
+    ok = classify_offer("AW S10 42mm Silver Sport Band")
+    assert ok.publish is True
+    assert "42mm" in ok.device_name
+    assert ok.color == "Silver"
+
+    for title in (
+        "Apple Watch Natural Titanium",
+        "Apple Watch Starlight",
+        "Apple Watch S1",
+        "Apple Watch S10",
+        "Apple Watch S10 · Silver · M/L",
+        "Apple Watch S10 · Starlight · M/L",
+        "Apple Watch S10 · Natural Titanium Milanese Loop",
+        "Apple Watch S10 46mm",  # size but no color
+    ):
+        ident = classify_offer(title)
+        assert ident.publish is False, title
 
 
 def test_airpods_max_generations() -> None:
@@ -1078,4 +1154,107 @@ def test_unisale_missing_colors_and_android_brands() -> None:
     pura = classify_offer("Huawei Pura 90S Pro Max 12/256GB Blaze Purple 🇷🇺")
     assert pura.publish is True
     assert pura.color == "Blaze Purple"
+
+
+def test_assortment_gaps_osmo_samsung_colors_rayban() -> None:
+    osmo = classify_offer("Osmo mobile 7p black")
+    assert osmo.publish is True
+    assert osmo.brand == "DJI"
+    assert "Osmo Mobile" in osmo.device_name
+
+    pocket = classify_offer("Osmo pocket 4 creator combo")
+    assert pocket.publish is True
+    assert pocket.brand == "DJI"
+    assert "Osmo Pocket 4" in pocket.device_name
+
+    mic = classify_offer("DJI Mic Mini 2‼️USB C (1TX + 1RX)")
+    assert mic.publish is True
+    assert mic.brand == "DJI"
+    assert "Mic Mini" in mic.device_name
+
+    s25 = classify_offer("Galaxy s25 12/256GB Blueblack 🇮🇳")
+    assert s25.publish is True
+    assert "Blue" in (s25.color or "")
+
+    ice = classify_offer("S25 FE 8/256 Iceblue 🇦🇪")
+    assert ice.publish is True
+
+    silver = classify_offer("S25 Ultra 12/256 Whitesilver 🇮🇳")
+    assert silver.publish is True
+
+    bay = classify_offer("Pixel 8 Pro 12/128GB Bay 🇺🇸")
+    assert bay.publish is True
+    assert bay.color == "Bay"
+
+    cyan = classify_offer("Nova 15 Max 8/256GB Cyan 🇷🇺", section="Huawei")
+    assert cyan.publish is True
+
+    orange = classify_offer("🇭🇰 17 Pro Max 512GB Orangе Sim+eSIM")
+    assert orange.publish is True
+    assert "Orange" in (orange.color or "")
+
+    x6 = classify_offer("Insta 360 X6 combo")
+    assert x6.publish is True
+    assert x6.brand == "Insta360"
+    assert "X6" in x6.device_name
+
+    ultra = classify_offer("🇺🇸 AW Ultra 3 BLACK Black Alpine Loop M")
+    assert ultra.publish is True
+    assert ultra.color == "Black Titanium"
+
+    party = classify_offer("JBL Partybox Encore 2 Essential Black")
+    assert party.publish is True
+    assert party.brand == "JBL"
+
+
+def test_galaxy_tab_s11_ultra_identity_normalized() -> None:
+    """Wi-Fi/LTE/5G + Grey collapse; base S11 never shares Ultra identity."""
+    wifi_a = classify_offer("🇦🇪 Samsung Tab S11 Ultra 12/256 WiFi X930 Gray")
+    wifi_b = classify_offer("Samsung Galaxy Tab S11 Ultra 12/256GB Grey Wi-Fi 🇦🇪")
+    assert wifi_a.publish and wifi_b.publish
+    assert wifi_a.device_name == "Galaxy Tab S11 Ultra Wi-Fi"
+    assert wifi_a.color == "Gray"
+    assert wifi_a.identity_key == wifi_b.identity_key
+
+    cell_a = classify_offer("Tab S11 Ultra 12/256 Gray 5G 🇦🇪")
+    cell_c = classify_offer("🇦🇪 Samsung Tab S11 Ultra 12/256 LTE X936 Gray")
+    assert cell_a.publish and cell_c.publish
+    assert cell_a.device_name == "Galaxy Tab S11 Ultra 5G"
+    assert cell_a.identity_key == cell_c.identity_key
+    assert cell_a.identity_key != wifi_a.identity_key
+
+    base = classify_offer("🇷🇺 Samsung Tab S11 12/256 WiFi X730 Gray")
+    assert base.publish
+    assert base.device_name == "Galaxy Tab S11 Wi-Fi"
+    assert "Ultra" not in base.device_name
+    assert base.identity_key != wifi_a.identity_key
+
+
+def test_tab_s10_not_apple_watch_and_ipad_air_not_iphone() -> None:
+    tab = classify_offer("Galaxy Tab S10 Lite 6/128 Gray SM-X400 🇷🇺")
+    assert tab.publish is True
+    assert tab.brand == "Samsung"
+    assert tab.device_category == "Планшеты"
+    assert "Tab S10" in tab.device_name
+    assert "Watch" not in tab.device_name
+    assert tab.storage == "128GB"
+
+    tab2 = classify_offer("Tab S10 Lite 6/128GB Gray 🇷🇺")
+    assert tab2.publish is True
+    assert tab2.brand == "Samsung"
+    assert "Watch" not in tab2.device_name
+
+    ipad = classify_offer("iPad Air 13 128GB Starlight Wi-Fi M3 (2025) 🇺🇸")
+    assert ipad.publish is True
+    assert ipad.kind == OfferKind.apple_other
+    assert "iPad" in ipad.device_name
+    assert ipad.device_name.startswith("iPad")
+    assert "iPhone" not in ipad.display_title
+
+    # Real watch still works and must not keep phone RAM/storage in identity
+    watch = classify_offer("Watch S10 46mm Silver (M/L)")
+    assert watch.publish is True
+    assert watch.device_name.startswith("Apple Watch S10")
+    assert watch.storage == ""
+    assert watch.ram == ""
 

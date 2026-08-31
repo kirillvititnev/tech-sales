@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.api.models.order import AdminOrderStatus, CustomerOrderStatus, DeliveryType
+from apps.api.models.account import UserNotification
 
 _ADMIN_ORDER = [
     AdminOrderStatus.accepted,
@@ -11,6 +12,14 @@ _ADMIN_ORDER = [
     AdminOrderStatus.assembled,
     AdminOrderStatus.shipped,
 ]
+
+CUSTOMER_STATUS_RU = {
+    CustomerOrderStatus.placed: "Оформлен",
+    CustomerOrderStatus.paid: "Оплачен",
+    CustomerOrderStatus.cancelled: "Отменён",
+    CustomerOrderStatus.ready: "Готов к выдаче",
+    CustomerOrderStatus.issued: "Выдан",
+}
 
 
 def validate_delivery(delivery_type: DeliveryType, delivery_address: str | None) -> str | None:
@@ -85,3 +94,35 @@ def cancel_order(current_customer: CustomerOrderStatus) -> CustomerOrderStatus:
     if current_customer in {CustomerOrderStatus.issued, CustomerOrderStatus.cancelled}:
         raise ValueError("Этот заказ нельзя отменить")
     return CustomerOrderStatus.cancelled
+
+
+def customer_status_notice(
+    *,
+    user_id,
+    number: str,
+    previous: CustomerOrderStatus,
+    new_status: CustomerOrderStatus,
+) -> UserNotification | None:
+    if user_id is None or previous == new_status:
+        return None
+    label = CUSTOMER_STATUS_RU.get(new_status, new_status.value)
+    return UserNotification(
+        user_id=user_id,
+        kind="order",
+        title=f"Заказ {number}",
+        body=f"Статус: {label}",
+    )
+
+
+def manager_notice(*, user_id, number: str, body: str) -> UserNotification | None:
+    if user_id is None:
+        return None
+    text = (body or "").strip()
+    if not text:
+        return None
+    return UserNotification(
+        user_id=user_id,
+        kind="manager",
+        title=f"Заказ {number}",
+        body=text[:4000],
+    )

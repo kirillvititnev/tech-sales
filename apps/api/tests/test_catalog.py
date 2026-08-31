@@ -1,4 +1,8 @@
-from apps.api.routers.catalog import SORT_OPTIONS
+from uuid import uuid4
+
+from apps.api.routers.catalog import CATALOG_ID_LOOKUP_LIMIT, CATALOG_LIST_LIMIT, SORT_OPTIONS
+from apps.api.schemas.catalog import ProductOut
+from apps.api.services.catalog_search import search_tokens
 
 
 def test_catalog_sort_options() -> None:
@@ -8,3 +12,35 @@ def test_catalog_sort_options() -> None:
     assert "name_asc" in SORT_OPTIONS
     assert "newest" in SORT_OPTIONS
     assert "hot" in SORT_OPTIONS
+
+
+def test_search_tokens_match_storage_and_split_punct() -> None:
+    assert search_tokens("17 pro 256") == ["17", "pro", "256"]
+    assert search_tokens("17 Pro 256GB") == ["17", "pro", "256gb", "256"]
+    assert search_tokens("17-pro,256") == ["17", "pro", "256"]
+    assert search_tokens("  1TB silver  ") == ["1tb", "1", "silver"]
+    assert search_tokens("") == []
+
+
+def test_catalog_id_lookup_limit() -> None:
+    assert CATALOG_ID_LOOKUP_LIMIT == 50
+
+
+def test_catalog_list_limit_capped() -> None:
+    assert CATALOG_LIST_LIMIT == 120
+
+
+def test_product_out_drops_remote_image_url() -> None:
+    base = {
+        "id": uuid4(),
+        "slug": "iphone",
+        "title": "iPhone",
+        "brand": "Apple",
+        "price": "1000",
+        "is_hot": False,
+        "attributes": {},
+    }
+    local = "/api/v1/catalog/media/" + "ab" * 16 + ".jpg"
+    assert ProductOut.model_validate({**base, "image_url": local}).image_url == local
+    assert ProductOut.model_validate({**base, "image_url": "https://evil.example/x.jpg"}).image_url is None
+    assert ProductOut.model_validate({**base, "image_url": "javascript:alert(1)"}).image_url is None

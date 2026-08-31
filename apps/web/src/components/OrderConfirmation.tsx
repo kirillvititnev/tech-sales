@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { API_URL, formatPrice, type Order } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { readOrderAccess } from "@/lib/orderAccess";
 
 const STATUS_RU: Record<string, string> = {
   placed: "Оформлен",
@@ -25,34 +27,55 @@ export function OrderConfirmation({
   catalogHref?: string;
 }) {
   const params = useParams<{ number: string }>();
-  const searchParams = useSearchParams();
   const number = decodeURIComponent(params?.number ?? "").toUpperCase();
-  const access = searchParams.get("access") ?? "";
+  const { authFetch, token, ready } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [access, setAccess] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!number || !access) {
+    setAccess(readOrderAccess(number));
+  }, [number]);
+
+  useEffect(() => {
+    if (access === null) {
+      return;
+    }
+    if (!number) {
+      setLoading(false);
+      setError("not_found");
+      return;
+    }
+    if (!access && !ready) {
+      return;
+    }
+    if (!access && ready && !token) {
       setLoading(false);
       setError("not_found");
       return;
     }
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
-        const res = await fetch(
-          `${API_URL}/api/v1/orders/by-number/${encodeURIComponent(number)}?access=${encodeURIComponent(access)}`,
-          { cache: "no-store" },
-        );
+        const res = access
+          ? await fetch(`${API_URL}/api/v1/orders/by-number/${encodeURIComponent(number)}`, {
+              cache: "no-store",
+              headers: { "X-Order-Access": access },
+            })
+          : await authFetch(`/api/v1/me/orders/${encodeURIComponent(number)}`);
         if (!res.ok) {
           throw new Error(res.status === 404 ? "not_found" : "fail");
         }
         const data = (await res.json()) as Order;
-        if (!cancelled) setOrder(data);
+        if (!cancelled) {
+          setOrder(data);
+          setError(null);
+        }
       } catch (e) {
         if (!cancelled) {
-          // Order was created (admin has it) — still show the number.
+          setOrder(null);
           setError(e instanceof Error && e.message === "not_found" ? "not_found" : "load_fail");
         }
       } finally {
@@ -62,7 +85,7 @@ export function OrderConfirmation({
     return () => {
       cancelled = true;
     };
-  }, [number, access]);
+  }, [number, access, ready, token, authFetch]);
 
   if (loading) {
     return (
@@ -80,7 +103,9 @@ export function OrderConfirmation({
         <h2>{number || "—"}</h2>
         <p className="lead">
           {error === "not_found"
-            ? "Заказ записан. Откройте ссылку из письма/экрана подтверждения — в ней есть ключ доступа."
+            ? access
+              ? "Заказ записан. Откройте ссылку из письма/экрана подтверждения — в ней есть ключ доступа."
+              : "Заказ не найден. Войдите в кабинет, если оформляли его с этого аккаунта."
             : "Заказ отправлен. Менеджер свяжется с вами для оплаты. Детали заказа подгрузятся при обновлении страницы."}
         </p>
         <div className="cta-row">
@@ -94,11 +119,21 @@ export function OrderConfirmation({
 
   return (
     <main className="section">
-      <p className="product-brand">Заказ принят</p>
+      <p className="product-brand">Квиток</p>
       <h2>{order.number}</h2>
       <p className="lead">
-        Менеджер свяжется с вами для подтверждения и оплаты. Онлайн-оплаты нет.
+        Это заявка менеджеру, не оплаченный чек. Дальше: подтверждение → оплата через менеджера →{" "}
+        {order.delivery_type === "cdek" ? "отправка СДЭК" : "самовывоз в Москве"}.
       </p>
+      <ol className="order-next">
+        <li>Менеджер сверит состав и котировку</li>
+        <li>Оплата — только через менеджера, онлайн-оплаты нет</li>
+        <li>
+          {order.delivery_type === "cdek"
+            ? "После оплаты — отправка СДЭК"
+            : "После оплаты — самовывоз в Москве"}
+        </li>
+      </ol>
       <dl className="order-meta">
         <div>
           <dt>Статус</dt>
@@ -115,9 +150,15 @@ export function OrderConfirmation({
           </div>
         ) : null}
         <div>
-          <dt>Сумма</dt>
+          <dt>К оплате через менеджера</dt>
           <dd>{formatPrice(order.total_amount)}</dd>
         </div>
+        {order.bonus_spent && Number(order.bonus_spent) > 0 ? (
+          <div>
+            <dt>Бонусы</dt>
+            <dd>−{formatPrice(order.bonus_spent)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Контакт</dt>
           <dd>
